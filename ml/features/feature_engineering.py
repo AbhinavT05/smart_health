@@ -145,10 +145,14 @@ def extract_features_from_window(
         ch_feats = extract_channel_features(data, name, sampling_rate)
         features.update(ch_feats)
         
-    # Signal Magnitude Area (SMA)
+    # Signal Magnitude Area (SMA) and Signal Vector Magnitude (SVMag)
     n = len(acc_x)
     features["acc_sma"] = float(np.sum(np.abs(acc_x) + np.abs(acc_y) + np.abs(acc_z)) / n)
     features["gyro_sma"] = float(np.sum(np.abs(gyro_x) + np.abs(gyro_y) + np.abs(gyro_z)) / n)
+    features["sma"] = features["acc_sma"]
+    features["svmag_mean"] = float(np.mean(acc_mag))
+    features["svmag_std"] = float(np.std(acc_mag, ddof=1)) if n > 1 else 0.0
+    features["svmag_max"] = float(np.max(acc_mag)) if n > 0 else 0.0
     
     # Dynamic Features: Jerk (rate of change of acceleration)
     dt = 1.0 / sampling_rate

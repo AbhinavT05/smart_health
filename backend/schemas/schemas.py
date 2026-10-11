@@ -2,15 +2,52 @@
 FallGuard AI - Pydantic Request & Response Schemas
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+import re
 
-# --- Auth Schemas ---
-# --- Auth & Profile Schemas ---
+E164_PHONE = re.compile(r"^\+[1-9]\d{7,14}$")
+
+
 class UserLogin(BaseModel):
     email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class UserRegister(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    email: str
+    password: str = Field(..., min_length=8, max_length=128)
+    confirm_password: Optional[str] = None
+    role: Optional[str] = "PATIENT"
+    phone_number: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Name is required.")
+        return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return v
+
 
 class UserResponse(BaseModel):
     id: int
@@ -18,29 +55,95 @@ class UserResponse(BaseModel):
     email: str
     role: str
     phone_number: Optional[str] = None
-    emergency_contact_name: Optional[str] = None
-    emergency_contact_phone: Optional[str] = None
-    emergency_contact_email: Optional[str] = None
+    share_location: bool = True
     created_at: datetime
+    selected_contact_count: int = 0
 
     model_config = {"from_attributes": True}
 
-class EmergencyContactUpdate(BaseModel):
-    emergency_contact_name: str
-    emergency_contact_phone: str
-    emergency_contact_email: Optional[str] = None
-    phone_number: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    expires_in_minutes: int = 1440
     user: UserResponse
 
-# --- Smartphone & Sensor Schemas ---
+
+class EmergencyContactCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    phone_number: str
+    relationship_label: Optional[str] = Field(default=None, max_length=80)
+    channel: str = Field(default="sms")
+    selected: bool = True
+
+    @field_validator("phone_number")
+    @classmethod
+    def e164(cls, v: str) -> str:
+        phone = v.strip().replace(" ", "")
+        if not E164_PHONE.match(phone):
+            raise ValueError("Phone number must be in international E.164 format, e.g. +15551234567.")
+        return phone
+
+    @field_validator("channel")
+    @classmethod
+    def channel_ok(cls, v: str) -> str:
+        allowed = {"sms", "email"}
+        val = v.lower().strip()
+        if val not in allowed:
+            raise ValueError("Channel must be 'sms' or 'email'.")
+        return val
+
+
+class EmergencyContactUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    phone_number: Optional[str] = None
+    relationship_label: Optional[str] = Field(default=None, max_length=80)
+    channel: Optional[str] = None
+    selected: Optional[bool] = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def e164(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        phone = v.strip().replace(" ", "")
+        if not E164_PHONE.match(phone):
+            raise ValueError("Phone number must be in international E.164 format, e.g. +15551234567.")
+        return phone
+
+
+class EmergencyContactResponse(BaseModel):
+    id: int
+    name: str
+    phone_number: str
+    relationship_label: Optional[str] = None
+    channel: str
+    selected: bool
+    verified: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DeviceResponse(BaseModel):
+    id: int
+    device_id: str
+    display_name: Optional[str] = None
+    last_seen: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class DeviceRegisterRequest(BaseModel):
+    device_id: str = Field(..., min_length=4, max_length=120)
+    display_name: Optional[str] = None
+
+
 class SensorAxisData(BaseModel):
     x: float
     y: float
     z: float
+
 
 class SmartphoneSensorMessage(BaseModel):
     type: str = "sensor_data"
@@ -52,11 +155,13 @@ class SmartphoneSensorMessage(BaseModel):
     gyroscope: SensorAxisData
     location: Optional[Dict[str, float]] = None
 
+
 class FallConfirmationPayload(BaseModel):
     type: str = "fall_confirmation"
     event_id: int
     action: str = Field(..., description="'I_AM_OK' or 'NEED_HELP'")
     location: Optional[Dict[str, float]] = None
+
 
 class DeviceStatus(BaseModel):
     device_id: str
@@ -66,6 +171,7 @@ class DeviceStatus(BaseModel):
     samples_received: int = 0
     buffer_samples: int = 0
     buffer_seconds: float = 0.0
+
 
 class SensorReadingCreate(BaseModel):
     device_id: str = "WEARABLE_DEV_01"
@@ -78,11 +184,12 @@ class SensorReadingCreate(BaseModel):
     gyro_z: float
     session_id: Optional[str] = None
 
+
 class SensorStreamBatch(BaseModel):
     device_id: str = "WEARABLE_DEV_01"
     readings: List[SensorReadingCreate]
 
-# --- Prediction Schemas ---
+
 class SingleWindowPredictionRequest(BaseModel):
     acc_x: List[float]
     acc_y: List[float]
@@ -93,25 +200,35 @@ class SingleWindowPredictionRequest(BaseModel):
     device_id: Optional[str] = "WEARABLE_DEV_01"
     sampling_rate: Optional[float] = 50.0
 
+
 class PredictionResponse(BaseModel):
     activity: str
-    ml_activity: str = "WALKING"
+    is_fall: bool
+    confidence: float
+    risk_level: str
+    model_available: bool = True
+    unavailable_reason: Optional[str] = None
+    rf_fall_probability: Optional[float] = None
+    svm_fall_probability: Optional[float] = None
+    hybrid_fall_probability: Optional[float] = None
+    rf_activity: Optional[str] = None
+    svm_activity: Optional[str] = None
+    ml_activity: str = "UNKNOWN"
     ml_fall_probability: float = 0.0
     safety_override: bool = False
-    confidence: float
-    risk_level: str # HIGH, MEDIUM, LOW
-    is_fall: bool
-    probabilities: Dict[str, float] = {}
+    fusion: Optional[Dict[str, Any]] = None
+    probabilities: Dict[str, Any] = {}
     model_name: str
     model_version: str
     timestamp: str
     features_summary: Optional[Dict[str, Any]] = None
 
+
 class BatchPredictionResponse(BaseModel):
     predictions: List[PredictionResponse]
     total_processed: int
 
-# --- Fall & Alert Schemas ---
+
 class FallEventResponse(BaseModel):
     id: int
     user_id: Optional[int] = None
@@ -121,8 +238,12 @@ class FallEventResponse(BaseModel):
     ml_activity: Optional[str] = None
     confidence: float
     fall_probability: Optional[float] = None
+    rf_fall_probability: Optional[float] = None
+    svm_fall_probability: Optional[float] = None
+    hybrid_fall_probability: Optional[float] = None
     safety_override: bool = False
     risk_level: str
+    event_kind: str = "MODEL_PREDICTION"
     status: str
     confirmed: bool = False
     alert_sent: bool = False
@@ -135,28 +256,64 @@ class FallEventResponse(BaseModel):
     notes: Optional[str] = None
     acc_peak: Optional[float] = None
     gyro_peak: Optional[float] = None
-    model_version: Optional[str] = "1.0.0"
+    model_version: Optional[str] = "2.0.0"
 
     model_config = {"from_attributes": True}
+
 
 class FallAcknowledgeRequest(BaseModel):
     acknowledged_by: str = "Operator"
     notes: Optional[str] = None
 
+
 class FallNoteRequest(BaseModel):
     notes: str
+
 
 class AlertResponse(BaseModel):
     id: int
     fall_event_id: Optional[int]
     alert_type: str
+    channel: Optional[str] = "sms"
     message: str
+    delivery_status: Optional[str] = None
+    provider: Optional[str] = None
     created_at: datetime
     acknowledged_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
 
-# --- Dashboard & Analytics Schemas ---
+
+class SendHelpRequest(BaseModel):
+    device_id: Optional[str] = None
+    location: Optional[Dict[str, float]] = None
+    share_location: Optional[bool] = None
+    idempotency_key: Optional[str] = Field(default=None, max_length=80)
+    confirmed: bool = Field(..., description="Client must set true after an in-app confirmation dialog.")
+
+
+class DeliveryResult(BaseModel):
+    contact_id: int
+    contact_name: str
+    channel: str
+    delivery_status: str
+    provider: str
+    simulated: bool
+    provider_message_id: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class SendHelpResponse(BaseModel):
+    event_id: int
+    event_kind: str
+    status: str
+    simulated: bool
+    provider: str
+    message: str
+    deliveries: List[DeliveryResult]
+    reused_existing: bool = False
+
+
 class ActivityHistoryItem(BaseModel):
     id: int
     timestamp: datetime
@@ -165,13 +322,24 @@ class ActivityHistoryItem(BaseModel):
     risk_level: str
     is_fall: bool
     device_id: str
+    rf_fall_probability: Optional[float] = None
+    svm_fall_probability: Optional[float] = None
+    hybrid_fall_probability: Optional[float] = None
+    model_available: Optional[bool] = True
 
     model_config = {"from_attributes": True}
 
+
 class DashboardSummary(BaseModel):
+    user: UserResponse
     current_activity: str
     current_confidence: float
     current_risk: str
+    hybrid_fall_probability: Optional[float] = None
+    rf_fall_probability: Optional[float] = None
+    svm_fall_probability: Optional[float] = None
+    model_available: bool = True
+    model_name: str = "Hybrid Random Forest + SVM"
     system_status: str
     sensor_connected: bool
     total_activities_count: int
@@ -179,14 +347,20 @@ class DashboardSummary(BaseModel):
     falls_today_count: int
     unacknowledged_falls_count: int
     last_fall_timestamp: Optional[datetime]
+    selected_contact_count: int
+    has_emergency_contact: bool
+    emergency_provider_mode: str
+    location_sharing_enabled: bool
     active_alerts: List[AlertResponse]
     recent_activities: List[ActivityHistoryItem]
+    recent_events: List[FallEventResponse]
 
-# --- Simulation Schemas ---
+
 class SimulationControlRequest(BaseModel):
     action: str = Field(..., description="'start', 'stop', 'pause', 'resume', 'trigger_fall'")
-    playback_speed: Optional[float] = 1.0 # 1.0 = real-time (50Hz), 2.0 = 2x speed
+    playback_speed: Optional[float] = 1.0
     scenario: Optional[str] = "mixed_activities_with_fall"
+
 
 class SimulationStatusResponse(BaseModel):
     is_running: bool
@@ -198,14 +372,27 @@ class SimulationStatusResponse(BaseModel):
     current_activity: str
     current_risk: str
 
-# --- Model Info Schemas ---
+
 class ModelInfoResponse(BaseModel):
     model_name: str
     model_version: str
+    model_available: bool
+    unavailable_reason: Optional[str] = None
     trained_at: Optional[str]
     features_count: int
     classes: List[str]
     window_size_seconds: float
     sampling_rate: float
+    fusion: Optional[Dict[str, Any]] = None
     metrics: Dict[str, Any]
     feature_importance_top10: List[Dict[str, Any]]
+    alert_cooldown_seconds: int
+    confirmation_timeout_seconds: float
+
+
+# Backward-compatible alias used by older auth route
+class LegacyEmergencyContactUpdate(BaseModel):
+    emergency_contact_name: str
+    emergency_contact_phone: str
+    emergency_contact_email: Optional[str] = None
+    phone_number: Optional[str] = None

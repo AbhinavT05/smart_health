@@ -2,38 +2,39 @@
 FallGuard AI - WebSocket Connection & Telemetry Broadcast Manager
 """
 
-import asyncio
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import WebSocket
 
 logger = logging.getLogger("WebSocketManager")
 
+
 class ConnectionManager:
-    """Manages active dashboard and smartphone WebSocket connections."""
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-        # Key: device_id -> WebSocket
+        self.monitor_users: Dict[WebSocket, Optional[int]] = {}
         self.device_connections: Dict[str, WebSocket] = {}
+        self.device_users: Dict[str, int] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, user_id: Optional[int] = None):
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"Monitor WebSocket client connected. Total active: {len(self.active_connections)}")
+        self.monitor_users[websocket] = user_id
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            logger.info(f"Monitor WebSocket client disconnected. Remaining: {len(self.active_connections)}")
+        self.monitor_users.pop(websocket, None)
 
-    def register_device(self, device_id: str, websocket: WebSocket):
+    def register_device(self, device_id: str, websocket: WebSocket, user_id: Optional[int] = None):
         self.device_connections[device_id] = websocket
-        logger.info(f"Device WebSocket registered for device={device_id}. Total devices: {len(self.device_connections)}")
+        if user_id is not None:
+            self.device_users[device_id] = user_id
 
     def unregister_device(self, device_id: str):
         self.device_connections.pop(device_id, None)
-        logger.info(f"Device WebSocket unregistered for device={device_id}. Remaining devices: {len(self.device_connections)}")
+        self.device_users.pop(device_id, None)
 
     async def send_to_device(self, device_id: str, message: Dict[str, Any]) -> bool:
         ws = self.device_connections.get(device_id)
@@ -47,32 +48,62 @@ class ConnectionManager:
             self.unregister_device(device_id)
             return False
 
+    async def broadcast_to_user(self, user_id: Optional[int], message: Dict[str, Any]):
+        if user_id is None:
+            await self.broadcast(message)
+            return
+        payload = dict(message)
+        payload["user_id"] = user_id
+        json_data = json.dumps(payload, default=str)
+
+        dead_monitors = []
+        for connection in self.active_connections:
+            owner = self.monitor_users.get(connection)
+            if owner is not None and owner != user_id:
+                continue
+            try:
+                await connection.send_text(json_data)
+            except Exception:
+                dead_monitors.append(connection)
+        for dead in dead_monitors:
+            self.disconnect(dead)
+
+        msg_type = message.get("type")
+        if msg_type in ("FALL_PENDING_CONFIRMATION", "FALL_CONFIRMATION_RESOLVED", "FALL_ALERT", "MODEL_UNAVAILABLE", "HELP_RESULT"):
+            dead_devices = []
+            for dev_id, dev_ws in list(self.device_connections.items()):
+                if self.device_users.get(dev_id) not in (user_id, None):
+                    continue
+                try:
+                    await dev_ws.send_text(json_data)
+                except Exception:
+                    dead_devices.append(dev_id)
+            for dead_dev in dead_devices:
+                self.unregister_device(dead_dev)
+
     async def broadcast(self, message: Dict[str, Any]):
-        """Broadcast JSON message to all connected monitor and device clients."""
         json_data = json.dumps(message, default=str)
-        
-        # Broadcast to dashboard monitors
         disconnected = []
         for connection in self.active_connections:
             try:
                 await connection.send_text(json_data)
-            except Exception as e:
-                logger.warning(f"Error broadcasting to monitor client: {e}")
+            except Exception:
                 disconnected.append(connection)
-                
         for dead_conn in disconnected:
             self.disconnect(dead_conn)
 
-        # Broadcast to devices if relevant (e.g. alerts or confirmations)
         if message.get("type") in ("FALL_PENDING_CONFIRMATION", "FALL_CONFIRMATION_RESOLVED", "FALL_ALERT"):
+            target_user = message.get("user_id") or (message.get("event") or {}).get("user_id")
             dead_devices = []
-            for dev_id, dev_ws in self.device_connections.items():
+            for dev_id, dev_ws in list(self.device_connections.items()):
+                if target_user is not None and self.device_users.get(dev_id) not in (target_user, None):
+                    continue
                 try:
                     await dev_ws.send_text(json_data)
-                except Exception as e:
-                    logger.warning(f"Error sending alert to device {dev_id}: {e}")
+                except Exception:
                     dead_devices.append(dev_id)
             for dead_dev in dead_devices:
                 self.unregister_device(dead_dev)
+
 
 ws_manager = ConnectionManager()

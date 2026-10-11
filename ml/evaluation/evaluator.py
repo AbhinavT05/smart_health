@@ -128,7 +128,7 @@ def plot_confusion_matrix(cm: List[List[int]], class_names: List[str], title: st
     plt.close()
 
 def plot_model_comparison(comparison_df: pd.DataFrame, save_path: Path):
-    """Plot bar chart comparing all 5 candidate models across key metrics."""
+    """Plot bar chart comparing Random Forest, SVM, and hybrid fusion metrics."""
     plt.figure(figsize=(12, 6))
     
     metrics = ["Accuracy", "Macro F1", "Fall Recall", "Fall Precision"]

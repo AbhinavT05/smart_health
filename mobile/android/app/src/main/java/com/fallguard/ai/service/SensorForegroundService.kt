@@ -42,7 +42,7 @@ class SensorForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val serverUrl = intent?.getStringExtra("SERVER_URL") ?: "ws://10.0.2.2:8000/ws/sensor"
+        val serverUrl = intent?.getStringExtra("SERVER_URL") ?: "ws://10.84.87.221:8000/ws/sensor"
         val jwtToken = intent?.getStringExtra("JWT_TOKEN") ?: ""
         val deviceId = intent?.getStringExtra("DEVICE_ID") ?: "android_pixel_01"
 

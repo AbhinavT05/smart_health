@@ -66,3 +66,40 @@ def split_by_subject(
     logger.info(f"Test Activities: {test_df['activity'].unique().tolist()}")
     
     return train_df, test_df, train_subs_list, test_subs_list
+
+
+def split_train_val_from_train(
+    train_df: pd.DataFrame,
+    val_subject_ratio: float = 0.20,
+    random_seed: int = 42,
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[int], List[int]]:
+    """
+    Hold out a validation cohort from training subjects only.
+    Test subjects are never used. If too few subjects exist, fall back to a
+    stratified window split so fusion hyperparameters still avoid the test set.
+    """
+    np.random.seed(random_seed)
+    subjects = sorted(train_df["subject_id"].unique())
+    if len(subjects) >= 4:
+        shuffled = np.random.permutation(subjects)
+        n_val = max(1, int(len(subjects) * val_subject_ratio))
+        val_subs = set(shuffled[:n_val])
+        fit_subs = set(shuffled[n_val:])
+        fit_df = train_df[train_df["subject_id"].isin(fit_subs)].copy()
+        val_df = train_df[train_df["subject_id"].isin(val_subs)].copy()
+        if fit_df["is_fall"].nunique() == 2 and val_df["is_fall"].nunique() == 2 and len(val_df) > 0:
+            return fit_df, val_df, sorted(fit_subs), sorted(val_subs)
+
+    from sklearn.model_selection import train_test_split
+
+    fit_df, val_df = train_test_split(
+        train_df,
+        test_size=val_subject_ratio,
+        random_state=random_seed,
+        stratify=train_df["is_fall"] if train_df["is_fall"].nunique() > 1 else None,
+    )
+    logger.warning(
+        "Too few training subjects for a clean subject-wise validation split; "
+        "using a stratified window split of the training cohort only (test remains isolated)."
+    )
+    return fit_df.copy(), val_df.copy(), sorted(fit_df["subject_id"].unique()), sorted(val_df["subject_id"].unique())
