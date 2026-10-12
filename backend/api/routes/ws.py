@@ -16,7 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 
 from backend.core.security import decode_access_token
 from backend.database.session import SessionLocal
-from backend.models.db_models import User
+from backend.models.db_models import User, Device
 from backend.services.websocket_service import ws_manager
 from backend.services.sensor_stream_manager import sensor_stream_manager
 from backend.services.prediction_service import prediction_service
@@ -56,6 +56,9 @@ async def websocket_monitor_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    if not isinstance(jwt_token, str) or not jwt_token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     payload = decode_access_token(jwt_token)
     if not payload or not payload.get("sub"):
         await websocket.send_text(json.dumps({
@@ -66,7 +69,14 @@ async def websocket_monitor_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    user_id = int(payload["sub"])
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    if user_id <= 0:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
@@ -82,7 +92,8 @@ async def websocket_monitor_endpoint(
     finally:
         db.close()
 
-    await ws_manager.connect(websocket, user_id=user_id)
+    # This endpoint already accepted the socket to receive the auth frame.
+    await ws_manager.connect(websocket, user_id=user_id, already_accepted=True)
     await websocket.send_text(json.dumps({
         "type": "auth_success",
         "user_id": user_id,
@@ -118,6 +129,7 @@ async def websocket_smartphone_sensor_endpoint(
     await websocket.accept()
     db = SessionLocal()
     user: Optional[User] = None
+    device_registered = False
     dev_id = device_id or "phone_001"
 
     try:
@@ -143,6 +155,9 @@ async def websocket_smartphone_sensor_endpoint(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
+        if not isinstance(jwt_token, str) or not jwt_token:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         payload = decode_access_token(jwt_token)
         if not payload or not payload.get("sub"):
             await websocket.send_text(json.dumps({
@@ -153,7 +168,15 @@ async def websocket_smartphone_sensor_endpoint(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        user_id = int(payload["sub"])
+        try:
+            user_id = int(payload["sub"])
+        except (TypeError, ValueError):
+            await websocket.send_text(json.dumps({"type": "error", "code": "AUTH_FAILED", "message": "Invalid user identity in JWT token."}))
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if user_id <= 0:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             await websocket.send_text(json.dumps({
@@ -164,8 +187,20 @@ async def websocket_smartphone_sensor_endpoint(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
+        registered_owners = db.query(Device.user_id).filter(Device.device_id == dev_id).all()
+        if any(owner_id != user.id for (owner_id,) in registered_owners):
+            await websocket.send_text(json.dumps({"type": "error", "code": "DEVICE_FORBIDDEN", "message": "This device is registered to another account."}))
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            user = None
+            return
+
         # Step 2: Register Device & Initialize Isolated Bounded Ring Buffer
-        ws_manager.register_device(dev_id, websocket, user_id=user.id)
+        device_registered = ws_manager.register_device(dev_id, websocket, user_id=user.id)
+        if not device_registered:
+            await websocket.send_text(json.dumps({"type": "error", "code": "DEVICE_IN_USE", "message": "This device is connected to another account."}))
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            user = None
+            return
         buffer = sensor_stream_manager.get_or_create_buffer(device_id=dev_id, user_id=user.id, source_type="REAL_PHONE")
         buffer.connected = True
 
@@ -292,8 +327,9 @@ async def websocket_smartphone_sensor_endpoint(
     except Exception as e:
         logger.error(f"Error in sensor stream loop for {dev_id}: {e}")
     finally:
-        ws_manager.unregister_device(dev_id)
-        sensor_stream_manager.set_device_connection(dev_id, user.id if user else None, False)
+        if device_registered:
+            ws_manager.unregister_device(dev_id, websocket)
+            sensor_stream_manager.set_device_connection(dev_id, user.id if user else None, False)
         # Broadcast status update strictly to device owner
         if user:
             await ws_manager.broadcast_to_user(user.id, {

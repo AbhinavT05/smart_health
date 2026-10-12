@@ -12,6 +12,8 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.fallguard.ai.auth.BackendConfig
+import com.fallguard.ai.auth.SecureSessionStore
 import com.fallguard.ai.sensor.SensorCollector
 import com.fallguard.ai.ui.FallConfirmationActivity
 import com.fallguard.ai.ui.MainActivity
@@ -30,6 +32,7 @@ class SensorForegroundService : Service() {
     private val binder = LocalBinder()
     lateinit var sensorCollector: SensorCollector
     var webSocketClient: SensorWebSocketClient? = null
+    var onAuthenticationRejected: ((String) -> Unit)? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): SensorForegroundService = this@SensorForegroundService
@@ -42,9 +45,16 @@ class SensorForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val serverUrl = intent?.getStringExtra("SERVER_URL") ?: "ws://10.84.87.221:8000/ws/sensor"
-        val jwtToken = intent?.getStringExtra("JWT_TOKEN") ?: ""
-        val deviceId = intent?.getStringExtra("DEVICE_ID") ?: "android_pixel_01"
+        val storedSession = SecureSessionStore.read(this)
+        val jwtToken = intent?.getStringExtra("JWT_TOKEN")?.takeIf { it.isNotBlank() } ?: storedSession?.accessToken.orEmpty()
+        if (jwtToken.isBlank()) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        val serverUrl = intent?.getStringExtra("SERVER_URL") ?: BackendConfig.sensorWebSocketUrl(this)
+        val deviceId = intent?.getStringExtra("DEVICE_ID")
+            ?: getSharedPreferences("fallguard_settings", MODE_PRIVATE).getString("sensor_device_id", "android_phone")
+            ?: "android_phone"
 
         startForeground(NOTIFICATION_ID, buildNotification("Active 50Hz Sensor Stream"))
 
@@ -56,9 +66,11 @@ class SensorForegroundService : Service() {
                         launchFallConfirmationScreen(evt.eventId, evt.timeoutSeconds, evt.confidence)
                     }
                 }
+                onAuthenticationRejected = { code -> this@SensorForegroundService.onAuthenticationRejected?.invoke(code) }
             }
         } else {
             webSocketClient?.updateConfig(serverUrl, jwtToken, deviceId)
+            webSocketClient?.onAuthenticationRejected = { code -> this@SensorForegroundService.onAuthenticationRejected?.invoke(code) }
         }
 
         webSocketClient?.connect()
@@ -89,6 +101,7 @@ class SensorForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        onAuthenticationRejected = null
         sensorCollector.stop()
         webSocketClient?.disconnect()
         Log.i(TAG, "SensorForegroundService stopped.")

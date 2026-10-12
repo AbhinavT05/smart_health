@@ -29,6 +29,44 @@
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/tv_signed_in_user"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_logout"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="Log out"
+                android:textColor="@color/text_primary"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/text_secondary" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="3dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="14dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MY SAFETY SUMMARY" android:textColor="@color/text_secondary" android:textSize="12sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tv_dashboard_summary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Loading your private dashboard…" android:textColor="@color/text_primary" android:textSize="14sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- Status Card -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -97,13 +135,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="WebSocket Server URL">
+            android:hint="Backend Base URL">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/et_server_url"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="ws://10.84.87.221:8000/ws/sensor"
+                android:inputType="textUri"
+                android:singleLine="true"
                 android:textColor="@color/text_primary" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -121,18 +160,13 @@
                 android:textColor="@color/text_primary" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.textfield.TextInputLayout
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="JWT Access Token">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_jwt_token"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="@color/text_primary" />
-        </com.google.android.material.textfield.TextInputLayout>
+            android:text="Your session token is stored securely and attached automatically."
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
 
         <!-- Action Buttons -->
         <com.google.android.material.button.MaterialButton

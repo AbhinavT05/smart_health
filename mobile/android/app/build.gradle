@@ -17,8 +17,21 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
     buildTypes {
+        debug {
+            def backendBaseUrl = project.findProperty("backendBaseUrl") ?: "http://10.0.2.2:8000"
+            buildConfigField "String", "DEFAULT_BACKEND_BASE_URL", "\"${backendBaseUrl}\""
+        }
         release {
+            def backendBaseUrl = project.findProperty("backendBaseUrl")?.toString()?.trim() ?: ""
+            if (backendBaseUrl && !backendBaseUrl.startsWith("https://")) {
+                throw new GradleException("Release builds require backendBaseUrl=https://<your-deployed-backend>.")
+            }
+            buildConfigField "String", "DEFAULT_BACKEND_BASE_URL", "\"${backendBaseUrl}\""
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

@@ -27,17 +27,20 @@
         android:roundIcon="@android:drawable/ic_dialog_alert"
         android:supportsRtl="true"
         android:theme="@style/Theme.FallGuardAI"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
 
         <!-- Main Dashboard & Settings Activity -->
         <activity
-            android:name=".ui.MainActivity"
+            android:name=".ui.LoginActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".ui.SignupActivity" android:exported="false" />
+        <activity android:name=".ui.MainActivity" android:exported="false" />
 
         <!-- High-Priority Fall Confirmation Activity (Appears over lock screen) -->
         <activity

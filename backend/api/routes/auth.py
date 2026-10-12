@@ -152,6 +152,12 @@ def register_device(
     db: Session = Depends(get_db)
 ):
     """Register smartphone device ID to authenticated user account."""
+    owner = db.query(Device).filter(Device.device_id == payload.device_id).first()
+    if owner and owner.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This device ID is already registered to another account.",
+        )
     device = (
         db.query(Device)
         .filter(Device.user_id == current_user.id, Device.device_id == payload.device_id)

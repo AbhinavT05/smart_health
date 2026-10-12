@@ -3,6 +3,19 @@
  * Handles WebSocket streaming, Chart.js telemetry waveforms, REST API polling, and fall alerts.
  */
 
+function normalizeAccessToken(value) {
+  if (typeof value !== "string") return null;
+  let token = value.trim();
+  // Accept a raw JWT, or migrate a legacy JSON string/object without ever
+  // putting the serialized object itself in the Authorization header.
+  try {
+    const parsed = JSON.parse(token);
+    if (typeof parsed === "string") token = parsed.trim();
+    else if (parsed && typeof parsed.access_token === "string") token = parsed.access_token.trim();
+  } catch (_) {}
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token) ? token : null;
+}
+
 class FallGuardApp {
   constructor() {
     this.ws = null;
@@ -29,17 +42,19 @@ class FallGuardApp {
 
     // Bearer tokens are kept for this browser tab's session. Migrate tokens
     // created by older versions without forcing users to paste them again.
-    this.token = sessionStorage.getItem("token") || localStorage.getItem("token");
+    const savedToken = sessionStorage.getItem("token") || localStorage.getItem("token");
+    this.token = normalizeAccessToken(savedToken);
+    this.invalidStoredToken = Boolean(savedToken && !this.token);
     if (this.token && !sessionStorage.getItem("token")) {
       sessionStorage.setItem("token", this.token);
-      localStorage.removeItem("token");
     }
+    localStorage.removeItem("token");
     this.init();
   }
 
   async init() {
     if (!this.token) {
-      window.location.href = "/login";
+      window.location.replace(this.invalidStoredToken ? "/login?reason=expired" : "/login");
       return;
     }
     const profileResponse = await this.authFetch("/api/auth/me");

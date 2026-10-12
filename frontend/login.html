@@ -86,6 +86,18 @@
         alertBox.textContent = "";
       }
 
+      function getApiError(detail, fallback) {
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) {
+          const messages = detail.map(item => {
+            const field = Array.isArray(item.loc) ? item.loc.slice(1).join(".") : "";
+            return `${field ? `${field}: ` : ""}${item.msg || "Invalid value."}`;
+          });
+          return messages.join(" ");
+        }
+        return fallback;
+      }
+
       function clearErrors() {
         document.querySelectorAll(".field-error").forEach(el => el.textContent = "");
         document.querySelectorAll(".form-control").forEach(el => el.classList.remove("is-invalid"));
@@ -163,7 +175,8 @@
         btnText.textContent = "Signing In...";
 
         try {
-          const res = await fetch("/api/auth/login", {
+          const apiUrl = new URL("/api/auth/login", window.location.href);
+          const res = await fetch(apiUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -173,7 +186,7 @@
 
           const data = await res.json().catch(() => ({}));
 
-          if (res.ok && data.access_token) {
+          if (res.ok && typeof data.access_token === "string" && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(data.access_token)) {
             showAlert("Login successful! Loading dashboard...", "success");
             sessionStorage.setItem("token", data.access_token);
             if (data.user) {
@@ -189,12 +202,16 @@
             btnSubmit.disabled = false;
             btnText.textContent = "Sign In";
           } else {
-            showAlert(data.detail || "Authentication failed. Please check your credentials.", "danger");
+            showAlert(getApiError(data.detail, `Sign in failed (HTTP ${res.status}). Please try again.`), "danger");
             btnSubmit.disabled = false;
             btnText.textContent = "Sign In";
           }
         } catch (err) {
-          showAlert("Network connection error. Please verify the backend is running and try again.", "danger");
+          const apiUrl = new URL("/api/auth/login", window.location.href);
+          const originMessage = window.location.protocol === "file:"
+            ? "Open FallGuard through the backend at http://127.0.0.1:8000/login."
+            : `No HTTP response was received from ${apiUrl.origin}${apiUrl.pathname}. Check that the FastAPI backend is running at this origin. If the frontend uses another origin, inspect the Network panel for the actual failed URL and CORS response.`;
+          showAlert(originMessage, "danger");
           btnSubmit.disabled = false;
           btnText.textContent = "Sign In";
         }

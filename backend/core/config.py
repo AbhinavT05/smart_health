@@ -73,20 +73,20 @@ class Settings:
             "dev-only-insecure-secret-set-SECRET_KEY-in-dotenv",
             "secret",
             "changeme",
+            "replace-with-a-random-32-plus-char-secret-for-production",
+            "your-secret-key-change-in-production",
         )
 
     @property
     def resolved_secret(self) -> str:
-        if self.ENVIRONMENT == "production":
-            if self.uses_default_secret() or len(self.SECRET_KEY) < 32:
-                raise RuntimeError(
-                    "Production startup rejected: Insecure or missing SECRET_KEY. "
-                    "A strong SECRET_KEY (at least 32 characters) must be configured in production."
-                )
-            return self.SECRET_KEY
-        if self.SECRET_KEY:
-            return self.SECRET_KEY
-        return "dev-only-insecure-secret-set-SECRET_KEY-in-dotenv"
+        if self.uses_default_secret() or len(self.SECRET_KEY.encode("utf-8")) < 32:
+            environment = "Production" if self.ENVIRONMENT == "production" else "Development"
+            raise RuntimeError(
+                f"{environment} startup rejected: insecure or missing SECRET_KEY. "
+                "Set SECRET_KEY in .env to a random value of at least 32 bytes. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        return self.SECRET_KEY
 
     def emergency_mode(self) -> str:
         if self.EMERGENCY_PROVIDER == "twilio" and self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN and self.TWILIO_FROM_NUMBER:

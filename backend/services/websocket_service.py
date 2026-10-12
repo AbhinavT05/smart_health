@@ -17,8 +17,9 @@ class ConnectionManager:
         self.device_connections: Dict[str, WebSocket] = {}
         self.device_users: Dict[str, int] = {}
 
-    async def connect(self, websocket: WebSocket, user_id: Optional[int] = None):
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket, user_id: Optional[int] = None, *, already_accepted: bool = False):
+        if not already_accepted:
+            await websocket.accept()
         self.active_connections.append(websocket)
         self.monitor_users[websocket] = user_id
 
@@ -27,12 +28,20 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
         self.monitor_users.pop(websocket, None)
 
-    def register_device(self, device_id: str, websocket: WebSocket, user_id: Optional[int] = None):
+    def register_device(self, device_id: str, websocket: WebSocket, user_id: Optional[int] = None) -> bool:
+        connected_user_id = self.device_users.get(device_id)
+        if connected_user_id is not None and user_id != connected_user_id:
+            logger.warning("Refusing device %s connection for a different user.", device_id)
+            return False
         self.device_connections[device_id] = websocket
         if user_id is not None:
             self.device_users[device_id] = user_id
+        return True
 
-    def unregister_device(self, device_id: str):
+    def unregister_device(self, device_id: str, websocket: Optional[WebSocket] = None):
+        # A rejected/old socket must not unregister a newer socket's device.
+        if websocket is not None and self.device_connections.get(device_id) is not websocket:
+            return
         self.device_connections.pop(device_id, None)
         self.device_users.pop(device_id, None)
 
@@ -45,7 +54,7 @@ class ConnectionManager:
             return True
         except Exception as e:
             logger.warning(f"Failed to send targeted message to device {device_id}: {e}")
-            self.unregister_device(device_id)
+            self.unregister_device(device_id, ws)
             return False
 
     async def broadcast_to_user(self, user_id: Optional[int], message: Dict[str, Any]):
@@ -79,9 +88,9 @@ class ConnectionManager:
                 try:
                     await dev_ws.send_text(json_data)
                 except Exception:
-                    dead_devices.append(dev_id)
-            for dead_dev in dead_devices:
-                self.unregister_device(dead_dev)
+                    dead_devices.append((dev_id, dev_ws))
+            for dead_dev, dead_ws in dead_devices:
+                self.unregister_device(dead_dev, dead_ws)
 
     async def broadcast(self, message: Dict[str, Any]):
         """

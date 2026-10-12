@@ -11,197 +11,239 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
+import android.view.View
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.fallguard.ai.R
+import com.fallguard.ai.auth.ApiException
+import com.fallguard.ai.auth.AuthApi
+import com.fallguard.ai.auth.AuthSession
+import com.fallguard.ai.auth.BackendConfig
+import com.fallguard.ai.auth.SecureSessionStore
 import com.fallguard.ai.service.SensorForegroundService
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
+import kotlinx.coroutines.launch
 
-/**
- * FallGuard AI - Smartphone Physical Sensor Client Dashboard
- */
+/** Authenticated smartphone sensor dashboard and monitor controls. */
 class MainActivity : AppCompatActivity() {
-
-    private val PERMISSIONS_REQUEST_CODE = 200
-
+    private val permissionsRequestCode = 200
     private lateinit var tvStatus: TextView
     private lateinit var tvBufferInfo: TextView
     private lateinit var tvSensorPreview: TextView
-    private lateinit var etServerUrl: TextInputEditText
+    private lateinit var tvDashboardSummary: TextView
+    private lateinit var tvSignedInUser: TextView
+    private lateinit var etBackendUrl: TextInputEditText
     private lateinit var etDeviceId: TextInputEditText
-    private lateinit var etJwtToken: TextInputEditText
     private lateinit var btnToggleMonitoring: MaterialButton
     private lateinit var btnSimulateFall: MaterialButton
+    private lateinit var btnLogout: MaterialButton
+    private lateinit var session: AuthSession
+    private val authApi by lazy { AuthApi(this) }
 
     private var service: SensorForegroundService? = null
     private var isMonitoringActive = false
+    private var bound = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val statsRunnable = object : Runnable {
+        override fun run() {
+            service?.let { s ->
+                val sc = s.sensorCollector
+                tvSensorPreview.text = String.format(
+                    "Acc:  (%.2f, %.2f, %.2f) m/s²\nGyro: (%.2f, %.2f, %.2f) rad/s",
+                    sc.latestAx, sc.latestAy, sc.latestAz, sc.latestGx, sc.latestGy, sc.latestGz
+                )
+                tvBufferInfo.text = String.format("Rolling Buffer: %d / 250 samples (~%.1fs)", sc.rollingBuffer.size, sc.rollingBuffer.size / 50.0)
+            }
+            mainHandler.postDelayed(this, 200)
+        }
+    }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = (binder as? SensorForegroundService.LocalBinder)?.getService()
-            setupServiceListeners()
+            service?.onAuthenticationRejected = { code ->
+                if (code == "AUTH_FAILED" || code == "AUTH_REQUIRED" || code == "USER_NOT_FOUND") {
+                    runOnUiThread { expireSession("The server rejected your session. Please sign in again.") }
+                } else {
+                    runOnUiThread {
+                        stopMonitoring()
+                        tvDashboardSummary.text = "Monitoring authorization rejected ($code). Check device ownership and try again."
+                    }
+                }
+            }
+            service?.webSocketClient?.onConnectionStateChanged = { connected ->
+                tvStatus.text = if (connected) getString(R.string.status_connected) else getString(R.string.status_disconnected)
+                tvStatus.setTextColor(ContextCompat.getColor(this@MainActivity, if (connected) R.color.success else R.color.danger))
+            }
         }
 
-        override fun onServiceDisconnected(name: ComponentName?) {
-            service = null
-        }
+        override fun onServiceDisconnected(name: ComponentName?) { service = null }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        session = SecureSessionStore.read(this) ?: run {
+            goToLogin("Please sign in to access your dashboard.")
+            return
+        }
         setContentView(R.layout.activity_main)
-
         initViews()
         requestAppPermissions()
-        startStatsUpdateLoop()
+        loadDashboardOnce()
+        mainHandler.post(statsRunnable)
     }
 
     private fun initViews() {
         tvStatus = findViewById(R.id.tv_connection_status)
         tvBufferInfo = findViewById(R.id.tv_buffer_info)
         tvSensorPreview = findViewById(R.id.tv_sensor_preview)
-        etServerUrl = findViewById(R.id.et_server_url)
+        tvDashboardSummary = findViewById(R.id.tv_dashboard_summary)
+        tvSignedInUser = findViewById(R.id.tv_signed_in_user)
+        etBackendUrl = findViewById(R.id.et_server_url)
         etDeviceId = findViewById(R.id.et_device_id)
-        etJwtToken = findViewById(R.id.et_jwt_token)
         btnToggleMonitoring = findViewById(R.id.btn_toggle_monitoring)
         btnSimulateFall = findViewById(R.id.btn_simulate_fall)
+        btnLogout = findViewById(R.id.btn_logout)
 
-        // Pre-fill demo token placeholder
-        etJwtToken.setText("demo_token")
+        etBackendUrl.setText(BackendConfig.getBaseUrl(this))
+        val defaultDevice = "android_${Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)?.take(32) ?: "phone"}"
+        etDeviceId.setText(getSharedPreferences("fallguard_settings", MODE_PRIVATE).getString("sensor_device_id", defaultDevice))
+        tvSignedInUser.text = "Signed in — ${getSharedPreferences("fallguard_user", MODE_PRIVATE).getString("name", "FallGuard member")}"
 
-        btnToggleMonitoring.setOnClickListener {
-            if (isMonitoringActive) {
-                stopMonitoring()
-            } else {
-                startMonitoring()
-            }
-        }
-
+        btnToggleMonitoring.setOnClickListener { if (isMonitoringActive) stopMonitoring() else startMonitoring() }
+        btnLogout.setOnClickListener { logout() }
         btnSimulateFall.setOnClickListener {
-            val intent = Intent(this, FallConfirmationActivity::class.java).apply {
+            startActivity(Intent(this, FallConfirmationActivity::class.java).apply {
                 putExtra("EVENT_ID", 9999)
                 putExtra("TIMEOUT_SECONDS", 15f)
                 putExtra("CONFIDENCE", 0.95f)
+            })
+        }
+    }
+
+    private fun loadDashboardOnce() {
+        if (!session.isValid()) {
+            expireSession("Your session expired. Please sign in again.")
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val profile = authApi.currentUser(session.accessToken)
+                tvSignedInUser.text = "Signed in — ${profile.name}"
+                val dashboard = authApi.dashboard(session.accessToken)
+                tvSignedInUser.text = "Signed in — ${dashboard.name}"
+                getSharedPreferences("fallguard_user", MODE_PRIVATE).edit().putString("name", dashboard.name).apply()
+                tvDashboardSummary.text = "Activity: ${dashboard.activity}\nRisk: ${dashboard.risk}  •  Status: ${dashboard.status}\nFalls recorded: ${dashboard.falls}  •  Activities: ${dashboard.activities}"
+            } catch (e: ApiException) {
+                if (e.statusCode == 401) expireSession("Your session is invalid or expired. Please sign in again.")
+                else tvDashboardSummary.text = "Dashboard unavailable (HTTP ${e.statusCode}): ${e.message}"
+            } catch (e: Exception) {
+                tvDashboardSummary.text = "Dashboard unavailable: ${e.message ?: "Check your backend URL and connection."}"
             }
-            startActivity(intent)
         }
     }
 
     private fun startMonitoring() {
-        val serverUrl = etServerUrl.text.toString().trim()
-        val deviceId = etDeviceId.text.toString().trim()
-        val jwtToken = etJwtToken.text.toString().trim()
-
-        if (serverUrl.isEmpty() || deviceId.isEmpty()) {
-            Toast.makeText(this, "Please enter Server URL and Device ID", Toast.LENGTH_SHORT).show()
+        val baseUrl = BackendConfig.saveBaseUrl(this, etBackendUrl.text?.toString().orEmpty())
+        if (baseUrl == null) {
+            tvDashboardSummary.text = "Enter a valid backend URL (for example http://10.0.2.2:8000)."
             return
         }
-
-        val serviceIntent = Intent(this, SensorForegroundService::class.java).apply {
-            putExtra("SERVER_URL", serverUrl)
-            putExtra("DEVICE_ID", deviceId)
-            putExtra("JWT_TOKEN", jwtToken)
+        val deviceId = etDeviceId.text?.toString()?.trim().orEmpty()
+        if (deviceId.length < 4) {
+            tvDashboardSummary.text = "Device ID must contain at least four characters."
+            return
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
+        if (!session.isValid()) {
+            expireSession("Your session expired. Please sign in again.")
+            return
         }
-
-        bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE)
-        isMonitoringActive = true
-        btnToggleMonitoring.text = getString(R.string.btn_stop)
-        btnToggleMonitoring.setBackgroundColor(ContextCompat.getColor(this, R.color.danger))
+        btnToggleMonitoring.isEnabled = false
+        btnToggleMonitoring.text = "Connecting…"
+        lifecycleScope.launch {
+            try {
+                // Register ownership with the authenticated API before opening the sensor socket.
+                authApi.registerDevice(session.accessToken, deviceId, "FallGuard Android phone")
+                getSharedPreferences("fallguard_settings", MODE_PRIVATE).edit().putString("sensor_device_id", deviceId).apply()
+                val serviceIntent = Intent(this@MainActivity, SensorForegroundService::class.java).apply {
+                    putExtra("SERVER_URL", BackendConfig.sensorWebSocketUrl(this@MainActivity))
+                    putExtra("DEVICE_ID", deviceId)
+                    putExtra("JWT_TOKEN", session.accessToken)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent) else startService(serviceIntent)
+                if (!bound) {
+                    bound = bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE)
+                }
+                isMonitoringActive = true
+                btnToggleMonitoring.text = getString(R.string.btn_stop)
+                btnToggleMonitoring.setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.danger))
+                tvDashboardSummary.text = "Device registered. Connecting securely to sensor monitoring…"
+            } catch (e: ApiException) {
+                if (e.statusCode == 401) expireSession("Your session expired. Please sign in again.")
+                else tvDashboardSummary.text = "Could not register this device (HTTP ${e.statusCode}): ${e.message}"
+            } catch (e: Exception) {
+                tvDashboardSummary.text = "Could not connect to backend: ${e.message ?: "Check the backend URL."}"
+            } finally {
+                btnToggleMonitoring.isEnabled = true
+                if (!isMonitoringActive) btnToggleMonitoring.text = getString(R.string.btn_start)
+            }
+        }
     }
 
     private fun stopMonitoring() {
+        service?.webSocketClient?.onConnectionStateChanged = null
+        service?.webSocketClient?.disconnect()
         val serviceIntent = Intent(this, SensorForegroundService::class.java)
-        try {
-            unbindService(connection)
-        } catch (e: Exception) {
-            // Ignore
+        if (bound) {
+            try { unbindService(connection) } catch (_: Exception) { }
+            bound = false
         }
         stopService(serviceIntent)
+        service = null
         isMonitoringActive = false
         btnToggleMonitoring.text = getString(R.string.btn_start)
         btnToggleMonitoring.setBackgroundColor(ContextCompat.getColor(this, R.color.primary))
         tvStatus.text = getString(R.string.status_disconnected)
         tvStatus.setTextColor(ContextCompat.getColor(this, R.color.danger))
+        tvDashboardSummary.text = "Monitoring stopped. Your fall detection and emergency contacts remain configured."
     }
 
-    private fun setupServiceListeners() {
-        service?.webSocketClient?.onConnectionStateChanged = { connected ->
-            if (connected) {
-                tvStatus.text = getString(R.string.status_connected)
-                tvStatus.setTextColor(ContextCompat.getColor(this, R.color.success))
-            } else {
-                tvStatus.text = getString(R.string.status_disconnected)
-                tvStatus.setTextColor(ContextCompat.getColor(this, R.color.danger))
-            }
-        }
+    private fun logout() {
+        // Stop a surviving foreground service even if the screen was recreated and no longer bound.
+        stopMonitoring()
+        SecureSessionStore.clear(this)
+        goToLogin("You have been signed out.")
     }
 
-    private fun startStatsUpdateLoop() {
-        mainHandler.post(object : Runnable {
-            override fun run() {
-                service?.let { s ->
-                    val sc = s.sensorCollector
-                    val ax = sc.latestAx
-                    val ay = sc.latestAy
-                    val az = sc.latestAz
-                    val gx = sc.latestGx
-                    val gy = sc.latestGy
-                    val gz = sc.latestGz
-                    val bufCount = sc.rollingBuffer.size
+    private fun expireSession(message: String) {
+        stopMonitoring()
+        SecureSessionStore.clear(this)
+        goToLogin(message)
+    }
 
-                    tvSensorPreview.text = String.format(
-                        "Acc:  (%.2f, %.2f, %.2f) m/s²\nGyro: (%.2f, %.2f, %.2f) rad/s",
-                        ax, ay, az, gx, gy, gz
-                    )
-                    tvBufferInfo.text = String.format(
-                        "Rolling Buffer: %d / 250 samples (~%.1fs)",
-                        bufCount, bufCount / 50.0
-                    )
-                }
-                mainHandler.postDelayed(this, 200) // Update UI at 5 Hz
-            }
-        })
+    private fun goToLogin(message: String) {
+        startActivity(Intent(this, LoginActivity::class.java).putExtra("notice", message)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        finish()
     }
 
     private fun requestAppPermissions() {
         val needed = mutableListOf<String>()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS) != PackageManager.PERMISSION_GRANTED) {
-            needed.add(Manifest.permission.BODY_SENSORS)
-        }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-
-        if (needed.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, needed.toTypedArray(), PERMISSIONS_REQUEST_CODE)
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.BODY_SENSORS)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionsRequestCode)
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(statsRunnable)
+        service?.webSocketClient?.onConnectionStateChanged = null
+        if (bound) try { unbindService(connection) } catch (_: Exception) { }
         super.onDestroy()
-        if (isMonitoringActive) {
-            try {
-                unbindService(connection)
-            } catch (e: Exception) {
-                // Ignore
-            }
-        }
     }
 }

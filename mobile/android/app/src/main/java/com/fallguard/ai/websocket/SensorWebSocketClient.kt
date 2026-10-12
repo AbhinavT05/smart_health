@@ -9,6 +9,7 @@ import com.fallguard.ai.model.IncomingPendingFallMessage
 import com.fallguard.ai.model.RawSensorReading
 import com.fallguard.ai.model.SensorDataPacket
 import com.google.gson.Gson
+import com.google.gson.JsonParser
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -41,9 +42,13 @@ class SensorWebSocketClient(
     private var shouldReconnect = true
     private var reconnectDelayMs = 1000L
     private val MAX_RECONNECT_DELAY_MS = 16000L
+    @Volatile private var generation = 0
+    @Volatile private var authenticationRejected = false
+    private var reconnectRunnable: Runnable? = null
 
     var onConnectionStateChanged: ((Boolean) -> Unit)? = null
     var onPendingFallReceived: ((IncomingPendingFallMessage) -> Unit)? = null
+    var onAuthenticationRejected: ((String) -> Unit)? = null
 
     fun updateConfig(url: String, token: String, devId: String) {
         serverUrl = url
@@ -53,66 +58,90 @@ class SensorWebSocketClient(
 
     fun connect() {
         shouldReconnect = true
-        disconnectInternal()
-
-        val fullUrl = if (serverUrl.contains("?")) {
-            "$serverUrl&token=$jwtToken&device_id=$deviceId"
-        } else {
-            "$serverUrl?token=$jwtToken&device_id=$deviceId"
-        }
-
-        val request = Request.Builder()
-            .url(fullUrl)
-            .build()
+        authenticationRejected = false
+        mainHandler.removeCallbacksAndMessages(null)
+        val currentGeneration = ++generation
+        webSocket?.cancel()
+        webSocket = null
+        isConnected = false
+        // The backend supports an initial auth frame on /ws/sensor. Send credentials
+        // only after the connection opens, never in the URL or logs.
+        val request = Request.Builder().url(serverUrl).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket connected to $serverUrl")
-                isConnected = true
-                reconnectDelayMs = 1000L
-                mainHandler.post { onConnectionStateChanged?.invoke(true) }
+                if (currentGeneration != generation) { ws.close(1000, "Superseded connection"); return }
+                Log.i(TAG, "Sensor WebSocket transport opened; awaiting authenticated server acknowledgement")
+                val authFrame = gson.toJson(mapOf("type" to "auth", "token" to jwtToken, "device_id" to deviceId))
+                if (!ws.send(authFrame)) {
+                    ws.close(1008, "Authentication frame could not be sent")
+                }
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
                 try {
+                    val json = JsonParser.parseString(text).asJsonObject
+                    when (json.get("type")?.asString) {
+                        "auth_success" -> {
+                            if (currentGeneration != generation) return
+                            isConnected = true
+                            reconnectDelayMs = 1000L
+                            mainHandler.post { onConnectionStateChanged?.invoke(true) }
+                            return
+                        }
+                        "error" -> {
+                            val code = json.get("code")?.asString ?: "AUTH_FAILED"
+                            if (code in setOf("AUTH_REQUIRED", "AUTH_FAILED", "USER_NOT_FOUND", "DEVICE_FORBIDDEN", "DEVICE_IN_USE")) {
+                                authenticationRejected = true
+                                isConnected = false
+                                Log.w(TAG, "Sensor WebSocket authorization rejected ($code)")
+                                mainHandler.post {
+                                    onConnectionStateChanged?.invoke(false)
+                                    onAuthenticationRejected?.invoke(code)
+                                }
+                                ws.close(1008, "Authorization rejected")
+                            }
+                            return
+                        }
+                    }
                     val msg = gson.fromJson(text, IncomingPendingFallMessage::class.java)
                     if (msg.type == "FALL_PENDING_CONFIRMATION" && msg.event != null) {
                         Log.w(TAG, "Received potential fall alert from backend! Event ID: ${msg.event.id}")
                         mainHandler.post { onPendingFallReceived?.invoke(msg) }
                     }
-                } catch (e: Exception) {
-                    Log.d(TAG, "Incoming WS message: $text")
-                }
+                } catch (_: Exception) { /* Ignore non-JSON or unrelated server messages. */ }
             }
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "WebSocket closing ($code): $reason")
                 isConnected = false
                 mainHandler.post { onConnectionStateChanged?.invoke(false) }
+                if (code == 1008) authenticationRejected = true
             }
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "WebSocket closed ($code): $reason")
                 isConnected = false
                 mainHandler.post { onConnectionStateChanged?.invoke(false) }
-                scheduleReconnect()
+                if (currentGeneration == generation) scheduleReconnect(currentGeneration)
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket error: ${t.message}")
                 isConnected = false
                 mainHandler.post { onConnectionStateChanged?.invoke(false) }
-                scheduleReconnect()
+                if (currentGeneration == generation && (response?.code == 401 || response?.code == 403)) {
+                    authenticationRejected = true
+                    mainHandler.post { onAuthenticationRejected?.invoke("AUTH_FAILED") }
+                } else if (currentGeneration == generation) scheduleReconnect(currentGeneration)
             }
         })
     }
 
     fun disconnect() {
         shouldReconnect = false
-        disconnectInternal()
-    }
-
-    private fun disconnectInternal() {
+        generation++
+        mainHandler.removeCallbacksAndMessages(null)
         try {
             webSocket?.close(1000, "Normal closure")
             webSocket = null
@@ -120,21 +149,24 @@ class SensorWebSocketClient(
             // Ignore
         }
         isConnected = false
+        mainHandler.post { onConnectionStateChanged?.invoke(false) }
     }
 
-    private fun scheduleReconnect() {
-        if (!shouldReconnect) return
-        mainHandler.postDelayed({
-            if (shouldReconnect && !isConnected) {
+    private fun scheduleReconnect(expectedGeneration: Int) {
+        if (!shouldReconnect || authenticationRejected) return
+        reconnectRunnable?.let(mainHandler::removeCallbacks)
+        reconnectRunnable = Runnable {
+            if (shouldReconnect && !isConnected && !authenticationRejected && expectedGeneration == generation) {
                 Log.i(TAG, "Attempting automatic reconnection (delay ${reconnectDelayMs}ms)...")
                 reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
                 connect()
             }
-        }, reconnectDelayMs)
+        }
+        mainHandler.postDelayed(reconnectRunnable!!, reconnectDelayMs)
     }
 
     fun sendSensorReading(reading: RawSensorReading, location: Map<String, Double>? = null): Boolean {
-        if (!isConnected) return false
+        if (!isConnected || authenticationRejected) return false
         val packet = SensorDataPacket(
             deviceId = deviceId,
             timestamp = reading.timestamp,

@@ -270,7 +270,9 @@ APP_NAME=FallGuard AI
 ENVIRONMENT=development
 API_HOST=0.0.0.0
 API_PORT=8000
-SECRET_KEY=your-secret-key-change-in-production
+# Generate a local key, then paste its output here (do not commit .env):
+# python -c "import secrets; print(secrets.token_urlsafe(48))"
+SECRET_KEY=<paste-generated-random-value-here>
 
 # Bounded Buffer (Strict 5-Second Retention)
 BUFFER_DURATION_SECONDS=5.0
@@ -289,18 +291,22 @@ TWILIO_FROM_NUMBER=
 
 ### 3. Start the FastAPI Server
 ```bash
-uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-- Web Dashboard: `http://localhost:8000`
+- Web Dashboard: `http://127.0.0.1:8000`
 - API Documentation (Swagger): `http://localhost:8000/docs`
 
 ### 4. Running the Android Application
-1. Open [`mobile/android`](file:///c:/Users/kpran/OneDrive/Desktop/sfd/mobile/android) in Android Studio.
-2. If testing on Android Emulator, set the Server URL to:
-   `ws://10.0.2.2:8000/ws/sensor`
-3. If testing on a physical smartphone, connect the phone to the same Wi-Fi network and enter:
-   `ws://<YOUR_LOCAL_IP>:8000/ws/sensor`
-4. Register or log in to obtain an access token, then tap **Start Monitoring**.
+1. Build from the Android project directory:
+   ```powershell
+   cd mobile/android
+   .\gradlew.bat :app:assembleDebug
+   ```
+2. Install `app/build/outputs/apk/debug/app-debug.apk`, or open `mobile/android` in Android Studio.
+3. On an Android Emulator, the app defaults to `http://10.0.2.2:8000`.
+4. On a physical phone, connect both devices to the same network, start FastAPI on `0.0.0.0`, allow port 8000 through Windows Firewall, and enter `http://<COMPUTER_LAN_IP>:8000` in the app. Never use `localhost`/`127.0.0.1` from the phone.
+5. Sign in or create an account in the native app. The token is encrypted with Android Keystore and the app registers its device before connecting to `/ws/sensor`.
+6. Release builds require an HTTPS backend URL, for example `-PbackendBaseUrl=https://<deployed-host>`; cleartext HTTP is enabled only in the Android debug manifest.
 
 ---
 

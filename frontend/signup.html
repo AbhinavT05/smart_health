@@ -113,6 +113,17 @@
         alertBox.textContent = "";
       }
 
+      function getApiError(detail, fallback) {
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) {
+          return detail.map(item => {
+            const field = Array.isArray(item.loc) ? item.loc.slice(1).join(".") : "";
+            return `${field ? `${field}: ` : ""}${item.msg || "Invalid value."}`;
+          }).join(" ");
+        }
+        return fallback;
+      }
+
       function clearErrors() {
         document.querySelectorAll(".field-error").forEach(el => el.textContent = "");
         document.querySelectorAll(".form-control").forEach(el => el.classList.remove("is-invalid"));
@@ -207,7 +218,8 @@
         if (emergencyEmail) payload.emergency_contact_email = emergencyEmail;
 
         try {
-          const res = await fetch("/api/auth/register", {
+          const apiUrl = new URL("/api/auth/register", window.location.href);
+          const res = await fetch(apiUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -226,25 +238,27 @@
               window.location.href = "/login?registered=1";
             }, 1200);
           } else if (res.status === 409) {
-            showAlert(data.detail || "Email is already registered. Please log in or use a different email.", "danger");
+            showAlert(getApiError(data.detail, "Email is already registered. Please log in or use a different email."), "danger");
             setFieldError("email", "err-email", "This email address is already registered.");
             btnSubmit.disabled = false;
             btnText.textContent = "Create Account";
           } else if (res.status === 422) {
             let errorMsg = "Validation error. Please verify the submitted details.";
-            if (Array.isArray(data.detail) && data.detail.length > 0) {
-              errorMsg = data.detail.map(d => d.msg || d.detail).join("; ");
-            }
+            errorMsg = getApiError(data.detail, errorMsg);
             showAlert(errorMsg, "danger");
             btnSubmit.disabled = false;
             btnText.textContent = "Create Account";
           } else {
-            showAlert(data.detail || "Registration failed. Please check your information and try again.", "danger");
+            showAlert(getApiError(data.detail, `Registration failed (HTTP ${res.status}). Please check your information and try again.`), "danger");
             btnSubmit.disabled = false;
             btnText.textContent = "Create Account";
           }
         } catch (err) {
-          showAlert("Network failure or server unavailable. Please check your connection and try again.", "danger");
+          const apiUrl = new URL("/api/auth/register", window.location.href);
+          const originMessage = window.location.protocol === "file:"
+            ? "Open FallGuard through the backend at http://127.0.0.1:8000/signup."
+            : `No HTTP response was received from ${apiUrl.origin}${apiUrl.pathname}. Check the FastAPI backend and inspect the Network panel for the actual failure.`;
+          showAlert(originMessage, "danger");
           btnSubmit.disabled = false;
           btnText.textContent = "Create Account";
         }
