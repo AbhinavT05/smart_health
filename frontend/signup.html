@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FallGuard AI - Patient Registration</title>
+  <meta name="description" content="Register for AI-Powered Wearable Fall Detection and Activity Monitoring.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="auth-body">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="brand-logo">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="shield-icon">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-title">FallGuard<span class="brand-ai">AI</span></span>
+            <span class="brand-subtitle">Clinical Telemetry</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="auth-header">
+        <h2 class="auth-title">Create Account</h2>
+        <p class="auth-desc">Register for patient fall detection and real-time activity monitoring.</p>
+      </div>
+
+      <!-- Feedback Banner -->
+      <div id="auth-alert" class="auth-alert" style="display:none;" role="alert"></div>
+
+      <form id="signup-form" novalidate>
+        <div class="form-group">
+          <label for="fullname">Full Name <span class="required">*</span></label>
+          <input type="text" id="fullname" name="name" class="form-control" placeholder="e.g. John Doe" required autocomplete="name" minlength="2" maxlength="100">
+          <span class="field-error" id="err-fullname"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="email">Email Address <span class="required">*</span></label>
+          <input type="email" id="email" name="email" class="form-control" placeholder="patient@example.com" required autocomplete="email">
+          <span class="field-error" id="err-email"></span>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col">
+            <label for="password">Password <span class="required">*</span></label>
+            <input type="password" id="password" name="password" class="form-control" placeholder="At least 8 characters" required autocomplete="new-password" minlength="8">
+            <span class="field-error" id="err-password"></span>
+          </div>
+          <div class="form-group col">
+            <label for="confirm-password">Confirm Password <span class="required">*</span></label>
+            <input type="password" id="confirm-password" name="confirm_password" class="form-control" placeholder="Re-type password" required autocomplete="new-password">
+            <span class="field-error" id="err-confirm-password"></span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="phone">Phone Number <span class="optional">(Optional)</span></label>
+          <input type="tel" id="phone" name="phone_number" class="form-control" placeholder="+15551234567" autocomplete="tel">
+          <span class="help-text">International format (e.g. +15550123) for SMS fall escalation.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="emergency-name">Emergency Contact Name <span class="optional">(Optional)</span></label>
+          <input type="text" id="emergency-name" name="emergency_contact_name" class="form-control" placeholder="Primary caregiver / family member">
+        </div>
+
+        <div class="form-group">
+          <label for="emergency-phone">Emergency Contact Phone <span class="optional">(Optional)</span></label>
+          <input type="tel" id="emergency-phone" name="emergency_contact_phone" class="form-control" placeholder="+15550199">
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="btn-submit">
+          <span id="btn-text">Create Account</span>
+        </button>
+      </form>
+
+      <div class="auth-footer">
+        <p>Already have an account? <a href="/login" class="auth-link">Sign In</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const form = document.getElementById("signup-form");
+      const btnSubmit = document.getElementById("btn-submit");
+      const btnText = document.getElementById("btn-text");
+      const alertBox = document.getElementById("auth-alert");
+
+      function showAlert(message, type) {
+        alertBox.className = "auth-alert auth-alert-" + type;
+        alertBox.textContent = message;
+        alertBox.style.display = "block";
+      }
+
+      function hideAlert() {
+        alertBox.style.display = "none";
+        alertBox.textContent = "";
+      }
+
+      function clearErrors() {
+        document.querySelectorAll(".field-error").forEach(el => el.textContent = "");
+        document.querySelectorAll(".form-control").forEach(el => el.classList.remove("is-invalid"));
+      }
+
+      function setFieldError(fieldId, errorId, message) {
+        const input = document.getElementById(fieldId);
+        const err = document.getElementById(errorId);
+        if (input) input.classList.add("is-invalid");
+        if (err) err.textContent = message;
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        hideAlert();
+        clearErrors();
+
+        const fullname = document.getElementById("fullname").value.trim();
+        const email = document.getElementById("email").value.trim().toLowerCase();
+        const password = document.getElementById("password").value;
+        const confirmPassword = document.getElementById("confirm-password").value;
+        const phone = document.getElementById("phone").value.trim();
+        const emergencyName = document.getElementById("emergency-name").value.trim();
+        const emergencyPhone = document.getElementById("emergency-phone").value.trim();
+
+        let hasError = false;
+
+        if (!fullname || fullname.length < 2) {
+          setFieldError("fullname", "err-fullname", "Please enter your full name (at least 2 characters).");
+          hasError = true;
+        }
+
+        if (!email) {
+          setFieldError("email", "err-email", "Email address is required.");
+          hasError = true;
+        } else if (!emailRegex.test(email)) {
+          setFieldError("email", "err-email", "Please enter a valid email address (e.g. user@example.com).");
+          hasError = true;
+        }
+
+        if (!password) {
+          setFieldError("password", "err-password", "Password is required.");
+          hasError = true;
+        } else if (password.length < 8) {
+          setFieldError("password", "err-password", "Password must be at least 8 characters long.");
+          hasError = true;
+        }
+
+        if (!confirmPassword) {
+          setFieldError("confirm-password", "err-confirm-password", "Please confirm your password.");
+          hasError = true;
+        } else if (password !== confirmPassword) {
+          setFieldError("confirm-password", "err-confirm-password", "Passwords do not match.");
+          hasError = true;
+        }
+
+        if (hasError) return;
+
+        // Prevent duplicate submissions
+        btnSubmit.disabled = true;
+        btnText.textContent = "Creating Account...";
+
+        const payload = {
+          name: fullname,
+          email: email,
+          password: password,
+          confirm_password: confirmPassword,
+          role: "PATIENT"
+        };
+        if (phone) payload.phone_number = phone;
+        if (emergencyName) payload.emergency_contact_name = emergencyName;
+        if (emergencyPhone) payload.emergency_contact_phone = emergencyPhone;
+
+        try {
+          const res = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (res.status === 201 || res.status === 200) {
+            showAlert("Account created successfully! Redirecting to login...", "success");
+            try {
+              sessionStorage.setItem("registered_email", email);
+            } catch (_) {}
+            setTimeout(() => {
+              window.location.href = "/login?registered=1";
+            }, 1200);
+          } else if (res.status === 409) {
+            showAlert(data.detail || "Email is already registered. Please log in or use a different email.", "danger");
+            setFieldError("email", "err-email", "This email address is already registered.");
+            btnSubmit.disabled = false;
+            btnText.textContent = "Create Account";
+          } else if (res.status === 422) {
+            let errorMsg = "Validation error. Please verify the submitted details.";
+            if (Array.isArray(data.detail) && data.detail.length > 0) {
+              errorMsg = data.detail.map(d => d.msg || d.detail).join("; ");
+            }
+            showAlert(errorMsg, "danger");
+            btnSubmit.disabled = false;
+            btnText.textContent = "Create Account";
+          } else {
+            showAlert(data.detail || "Registration failed. Please check your information and try again.", "danger");
+            btnSubmit.disabled = false;
+            btnText.textContent = "Create Account";
+          }
+        } catch (err) {
+          showAlert("Network failure or server unavailable. Please check your connection and try again.", "danger");
+          btnSubmit.disabled = false;
+          btnText.textContent = "Create Account";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

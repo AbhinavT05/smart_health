@@ -27,10 +27,16 @@ class FallGuardApp {
     this.liveAccChart = null;
     this.liveGyroChart = null;
 
+    this.token = localStorage.getItem("token");
     this.init();
   }
 
   init() {
+    if (!this.token) {
+      window.location.href = "/login";
+      return;
+    }
+    this.renderUserProfile();
     this.bindEvents();
     this.initCharts();
     this.connectWebSocket();
@@ -39,15 +45,61 @@ class FallGuardApp {
     this.loadFallIncidents();
     this.loadActivityHistory();
 
-    // Auto-refresh summary data every 5 seconds
+    // Auto-refresh summary data every 4 seconds
     setInterval(() => {
       if (this.activeTab === "tab-dashboard") this.loadDashboardSummary();
       if (this.activeTab === "tab-falls") this.loadFallIncidents();
     }, 4000);
   }
 
+  renderUserProfile() {
+    try {
+      const stored = localStorage.getItem("user");
+      if (stored) {
+        const user = JSON.parse(stored);
+        if (user.name) {
+          const nameEl = document.getElementById("profile-name");
+          if (nameEl) nameEl.textContent = user.name;
+          const initials = user.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+          const avatarEl = document.getElementById("user-avatar");
+          if (avatarEl) avatarEl.textContent = initials || "U";
+        }
+        if (user.role) {
+          const roleEl = document.getElementById("profile-role");
+          if (roleEl) roleEl.textContent = `${user.role} View`;
+        }
+      }
+    } catch (_) {}
+  }
+
+  async authFetch(url, options = {}) {
+    const headers = {
+      ...(options.headers || {}),
+      "Authorization": `Bearer ${this.token}`
+    };
+    try {
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        window.location.href = "/login";
+        return null;
+      }
+      return res;
+    } catch (err) {
+      console.error(`Network or fetch error for ${url}:`, err);
+      return null;
+    }
+  }
+
   // --- UI Event Binding ---
   bindEvents() {
+    // Logout button
+    document.getElementById("btn-logout")?.addEventListener("click", () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.location.href = "/login";
+    });
     // Navigation tabs
     document.querySelectorAll(".nav-item").forEach(btn => {
       btn.addEventListener("click", (e) => {
@@ -139,7 +191,7 @@ class FallGuardApp {
   // --- WebSocket Connection ---
   connectWebSocket() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/monitor`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/monitor${this.token ? `?token=${encodeURIComponent(this.token)}` : ''}`;
 
     this.ws = new WebSocket(wsUrl);
 
@@ -428,8 +480,8 @@ class FallGuardApp {
   // --- REST API Calls ---
   async loadDashboardSummary() {
     try {
-      const res = await fetch("/api/dashboard/summary");
-      if (!res.ok) return;
+      const res = await this.authFetch("/api/dashboard/summary");
+      if (!res || !res.ok) return;
       const data = await res.json();
 
       document.getElementById("stat-falls-today").textContent = data.falls_today_count;
@@ -487,8 +539,8 @@ class FallGuardApp {
     try {
       const statusFilter = document.getElementById("filter-fall-status")?.value || "";
       const url = statusFilter ? `/api/falls?status=${statusFilter}` : `/api/falls`;
-      const res = await fetch(url);
-      if (!res.ok) return;
+      const res = await this.authFetch(url);
+      if (!res || !res.ok) return;
       const falls = await res.json();
 
       const tbody = document.getElementById("falls-table-body");
@@ -530,8 +582,8 @@ class FallGuardApp {
       if (riskFilter) query.push(`risk_level=${riskFilter}`);
       const qs = query.length > 0 ? `?${query.join("&")}` : "";
 
-      const res = await fetch(`/api/activities/history${qs}`);
-      if (!res.ok) return;
+      const res = await this.authFetch(`/api/activities/history${qs}`);
+      if (!res || !res.ok) return;
       const records = await res.json();
 
       const tbody = document.getElementById("history-table-body");
@@ -561,11 +613,11 @@ class FallGuardApp {
   async loadModelAnalytics() {
     try {
       const [resInfo, resComp] = await Promise.all([
-        fetch("/api/model/info"),
-        fetch("/api/model/comparisons")
+        this.authFetch("/api/model/info"),
+        this.authFetch("/api/model/comparisons")
       ]);
 
-      if (resInfo.ok) {
+      if (resInfo && resInfo.ok) {
         const info = await resInfo.json();
         document.getElementById("analytics-model-name").textContent = info.model_name;
         document.getElementById("stat-model-name").textContent = info.model_name;
@@ -598,7 +650,7 @@ class FallGuardApp {
         }
       }
 
-      if (resComp.ok) {
+      if (resComp && resComp.ok) {
         const comps = await resComp.json();
         const tbody = document.getElementById("models-benchmark-tbody");
         if (tbody && comps.length > 0) {
@@ -625,7 +677,7 @@ class FallGuardApp {
   async controlSim(action) {
     try {
       const scenario = document.getElementById("sim-scenario-select")?.value || "mixed_activities_with_fall";
-      const res = await fetch("/api/simulation/control", {
+      const res = await this.authFetch("/api/simulation/control", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -634,7 +686,7 @@ class FallGuardApp {
           scenario: scenario
         })
       });
-      if (res.ok) {
+      if (res && res.ok) {
         const status = await res.json();
         const badge = document.getElementById("sim-badge-status");
         if (badge) {
@@ -668,12 +720,12 @@ class FallGuardApp {
     const notes = document.getElementById("modal-ack-notes").value || "";
 
     try {
-      const res = await fetch(`/api/falls/${this.selectedFallId}/acknowledge`, {
+      const res = await this.authFetch(`/api/falls/${this.selectedFallId}/acknowledge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ acknowledged_by: staff, notes: notes })
       });
-      if (res.ok) {
+      if (res && res.ok) {
         this.closeAcknowledgeModal();
         document.getElementById("global-alert-banner").style.display = "none";
         this.loadFallIncidents();

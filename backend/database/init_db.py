@@ -13,16 +13,20 @@ from sqlalchemy import inspect, text
 
 logger = logging.getLogger("InitDB")
 
-def migrate_sqlite_columns():
+def migrate_sqlite_columns(bind_engine=None):
     """Ensure newly added columns exist in existing SQLite databases."""
+    active_engine = bind_engine or engine
     try:
-        insp = inspect(engine)
+        insp = inspect(active_engine)
         tables = insp.get_table_names()
-        with engine.connect() as conn:
+        with active_engine.connect() as conn:
             if "users" in tables:
                 user_cols = [c["name"] for c in insp.get_columns("users")]
                 if "phone_number" not in user_cols:
                     conn.execute(text("ALTER TABLE users ADD COLUMN phone_number VARCHAR(50)"))
+                if "share_location" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN share_location BOOLEAN DEFAULT 1"))
+                    conn.execute(text("UPDATE users SET share_location = 1 WHERE share_location IS NULL"))
                 if "emergency_contact_name" not in user_cols:
                     conn.execute(text("ALTER TABLE users ADD COLUMN emergency_contact_name VARCHAR(100)"))
                 if "emergency_contact_phone" not in user_cols:
@@ -42,29 +46,72 @@ def migrate_sqlite_columns():
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN fall_probability FLOAT"))
                 if "safety_override" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN safety_override BOOLEAN DEFAULT 0"))
+                if "event_kind" not in fall_cols:
+                    conn.execute(text("ALTER TABLE fall_events ADD COLUMN event_kind VARCHAR(40) DEFAULT 'MODEL_PREDICTION'"))
+                    conn.execute(text("UPDATE fall_events SET event_kind = 'MODEL_PREDICTION' WHERE event_kind IS NULL"))
                 if "confirmed" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN confirmed BOOLEAN DEFAULT 0"))
                 if "alert_sent" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN alert_sent BOOLEAN DEFAULT 0"))
                 if "emergency_contact" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN emergency_contact VARCHAR(200)"))
+                if "idempotency_key" not in fall_cols:
+                    conn.execute(text("ALTER TABLE fall_events ADD COLUMN idempotency_key VARCHAR(80)"))
                 if "location_lat" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN location_lat FLOAT"))
                 if "location_lon" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN location_lon FLOAT"))
                 if "model_version" not in fall_cols:
                     conn.execute(text("ALTER TABLE fall_events ADD COLUMN model_version VARCHAR(50) DEFAULT '1.0.0'"))
+                if "rf_fall_probability" not in fall_cols:
+                    conn.execute(text("ALTER TABLE fall_events ADD COLUMN rf_fall_probability FLOAT"))
+                if "svm_fall_probability" not in fall_cols:
+                    conn.execute(text("ALTER TABLE fall_events ADD COLUMN svm_fall_probability FLOAT"))
+                if "hybrid_fall_probability" not in fall_cols:
+                    conn.execute(text("ALTER TABLE fall_events ADD COLUMN hybrid_fall_probability FLOAT"))
+
+            if "activity_predictions" in tables:
+                act_cols = [c["name"] for c in insp.get_columns("activity_predictions")]
+                if "user_id" not in act_cols:
+                    conn.execute(text("ALTER TABLE activity_predictions ADD COLUMN user_id INTEGER"))
+                if "rf_fall_probability" not in act_cols:
+                    conn.execute(text("ALTER TABLE activity_predictions ADD COLUMN rf_fall_probability FLOAT"))
+                if "svm_fall_probability" not in act_cols:
+                    conn.execute(text("ALTER TABLE activity_predictions ADD COLUMN svm_fall_probability FLOAT"))
+                if "hybrid_fall_probability" not in act_cols:
+                    conn.execute(text("ALTER TABLE activity_predictions ADD COLUMN hybrid_fall_probability FLOAT"))
+                if "model_available" not in act_cols:
+                    conn.execute(text("ALTER TABLE activity_predictions ADD COLUMN model_available BOOLEAN DEFAULT 1"))
+
+            if "alerts" in tables:
+                alert_cols = [c["name"] for c in insp.get_columns("alerts")]
+                if "user_id" not in alert_cols:
+                    conn.execute(text("ALTER TABLE alerts ADD COLUMN user_id INTEGER"))
+                if "contact_id" not in alert_cols:
+                    conn.execute(text("ALTER TABLE alerts ADD COLUMN contact_id INTEGER"))
+                if "channel" not in alert_cols:
+                    conn.execute(text("ALTER TABLE alerts ADD COLUMN channel VARCHAR(30) DEFAULT 'sms'"))
+                if "delivery_status" not in alert_cols:
+                    conn.execute(text("ALTER TABLE alerts ADD COLUMN delivery_status VARCHAR(40) DEFAULT 'UNCONFIRMED'"))
+                if "provider" not in alert_cols:
+                    conn.execute(text("ALTER TABLE alerts ADD COLUMN provider VARCHAR(40)"))
+                if "provider_message_id" not in alert_cols:
+                    conn.execute(text("ALTER TABLE alerts ADD COLUMN provider_message_id VARCHAR(80)"))
+
             conn.commit()
     except Exception as e:
         logger.warning(f"Note on DB schema migration: {e}")
 
-def init_db():
+def init_db(bind_engine=None):
     """Create all database tables and seed default users."""
+    active_engine = bind_engine or engine
     logger.info("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    migrate_sqlite_columns()
+    Base.metadata.create_all(bind=active_engine)
+    migrate_sqlite_columns(bind_engine=active_engine)
     
-    db = SessionLocal()
+    from sqlalchemy.orm import sessionmaker
+    maker = sessionmaker(autocommit=False, autoflush=False, bind=active_engine) if bind_engine else SessionLocal
+    db = maker()
     try:
         # Check if users already exist
         admin_user = db.query(User).filter(User.email == "admin@fallguard.ai").first()

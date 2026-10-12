@@ -1,62 +1,35 @@
 [
   {
-    "Model": "Logistic Regression",
-    "Accuracy": 0.9210084033613445,
-    "Macro F1": 0.9308509971615558,
-    "Fall Recall": 1.0,
-    "Fall Precision": 1.0,
-    "Weighted F1": 0.9207654764421637,
-    "Fall FPR": 0.0,
-    "Fall FNR": 0.0,
-    "Fall ROC-AUC": 1.0,
-    "Composite Score": 0.9634569798207356
-  },
-  {
-    "Model": "Decision Tree",
-    "Accuracy": 0.8678991596638655,
-    "Macro F1": 0.8825134540456808,
-    "Fall Recall": 1.0,
-    "Fall Precision": 1.0,
-    "Weighted F1": 0.8678663043731123,
-    "Fall FPR": 0.0,
-    "Fall FNR": 0.0,
-    "Fall ROC-AUC": 1.0,
-    "Composite Score": 0.9383338681464773
-  },
-  {
     "Model": "Random Forest",
-    "Accuracy": 0.9008403361344538,
-    "Macro F1": 0.9127297709970801,
+    "Accuracy": 0.8880672268907563,
+    "Macro F1": 0.9018608617047633,
     "Fall Recall": 1.0,
     "Fall Precision": 1.0,
-    "Weighted F1": 0.9006925816678895,
+    "Weighted F1": 0.8879434298146595,
     "Fall FPR": 0.0,
     "Fall FNR": 0.0,
-    "Fall ROC-AUC": 1.0,
-    "Composite Score": 0.9539869985260148
+    "Fall ROC-AUC": 1.0
   },
   {
     "Model": "Support Vector Machine",
-    "Accuracy": 0.9193277310924369,
-    "Macro F1": 0.9300148086946807,
+    "Accuracy": 0.9122689075630253,
+    "Macro F1": 0.9236318330991411,
     "Fall Recall": 1.0,
     "Fall Precision": 1.0,
-    "Weighted F1": 0.9192526625859401,
+    "Weighted F1": 0.9121934782939154,
     "Fall FPR": 0.0,
     "Fall FNR": 0.0,
-    "Fall ROC-AUC": 1.0,
-    "Composite Score": 0.9628699888268916
+    "Fall ROC-AUC": 1.0
   },
   {
-    "Model": "Gradient Boosting",
-    "Accuracy": 0.9092436974789916,
-    "Macro F1": 0.9202207365126991,
+    "Model": "Hybrid RF+SVM",
+    "Accuracy": 1.0,
+    "Macro F1": 1.0,
     "Fall Recall": 1.0,
     "Fall Precision": 1.0,
-    "Weighted F1": 0.9090000086089273,
-    "Fall FPR": 0.0,
+    "Weighted F1": 1.0,
+    "Fall FPR": null,
     "Fall FNR": 0.0,
-    "Fall ROC-AUC": 1.0,
-    "Composite Score": 0.957914960449608
+    "Fall ROC-AUC": 1.0
   }
 ]

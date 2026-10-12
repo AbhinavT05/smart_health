@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FallGuard AI - Sign In</title>
+  <meta name="description" content="Sign in to FallGuard AI Wearable Fall Detection and Activity Monitoring System.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="auth-body">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="brand-logo">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="shield-icon">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-title">FallGuard<span class="brand-ai">AI</span></span>
+            <span class="brand-subtitle">Clinical Telemetry</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="auth-header">
+        <h2 class="auth-title">Welcome Back</h2>
+        <p class="auth-desc">Sign in to access patient monitoring telemetry and fall alerts.</p>
+      </div>
+
+      <!-- Feedback Banner -->
+      <div id="auth-alert" class="auth-alert" style="display:none;" role="alert"></div>
+
+      <form id="login-form" novalidate>
+        <div class="form-group">
+          <label for="email">Email Address <span class="required">*</span></label>
+          <input type="email" id="email" name="email" class="form-control" placeholder="user@fallguard.ai" required autocomplete="email">
+          <span class="field-error" id="err-email"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password <span class="required">*</span></label>
+          <input type="password" id="password" name="password" class="form-control" placeholder="Enter your password" required autocomplete="current-password">
+          <span class="field-error" id="err-password"></span>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="btn-submit">
+          <span id="btn-text">Sign In</span>
+        </button>
+      </form>
+
+      <div class="demo-accounts-card">
+        <span class="demo-title">Quick Fill Demo Credentials:</span>
+        <div class="demo-buttons">
+          <button type="button" class="btn btn-sm btn-outline" id="btn-demo-caregiver">Caregiver</button>
+          <button type="button" class="btn btn-sm btn-outline" id="btn-demo-admin">Clinical Admin</button>
+        </div>
+      </div>
+
+      <div class="auth-footer">
+        <p>Don't have an account yet? <a href="/signup" class="auth-link">Create Account</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const form = document.getElementById("login-form");
+      const emailInput = document.getElementById("email");
+      const passwordInput = document.getElementById("password");
+      const btnSubmit = document.getElementById("btn-submit");
+      const btnText = document.getElementById("btn-text");
+      const alertBox = document.getElementById("auth-alert");
+
+      function showAlert(message, type) {
+        alertBox.className = "auth-alert auth-alert-" + type;
+        alertBox.textContent = message;
+        alertBox.style.display = "block";
+      }
+
+      function hideAlert() {
+        alertBox.style.display = "none";
+        alertBox.textContent = "";
+      }
+
+      function clearErrors() {
+        document.querySelectorAll(".field-error").forEach(el => el.textContent = "");
+        document.querySelectorAll(".form-control").forEach(el => el.classList.remove("is-invalid"));
+      }
+
+      // Check if redirected from successful signup
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("registered") === "1" || urlParams.get("registered") === "true") {
+        showAlert("Registration successful! Please log in with your credentials.", "success");
+      }
+
+      // Prefill email if saved in sessionStorage
+      try {
+        const savedEmail = sessionStorage.getItem("registered_email");
+        if (savedEmail) {
+          emailInput.value = savedEmail;
+          passwordInput.focus();
+          sessionStorage.removeItem("registered_email");
+        } else {
+          emailInput.focus();
+        }
+      } catch (_) {}
+
+      // Quick demo credential buttons
+      document.getElementById("btn-demo-caregiver")?.addEventListener("click", () => {
+        emailInput.value = "caregiver@fallguard.ai";
+        passwordInput.value = "caregiver123";
+        clearErrors();
+        hideAlert();
+      });
+
+      document.getElementById("btn-demo-admin")?.addEventListener("click", () => {
+        emailInput.value = "admin@fallguard.ai";
+        passwordInput.value = "admin123";
+        clearErrors();
+        hideAlert();
+      });
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        hideAlert();
+        clearErrors();
+
+        const email = emailInput.value.trim().toLowerCase();
+        const password = passwordInput.value;
+
+        let hasError = false;
+
+        if (!email) {
+          document.getElementById("err-email").textContent = "Email is required.";
+          emailInput.classList.add("is-invalid");
+          hasError = true;
+        } else if (!emailRegex.test(email)) {
+          document.getElementById("err-email").textContent = "Please enter a valid email address.";
+          emailInput.classList.add("is-invalid");
+          hasError = true;
+        }
+
+        if (!password) {
+          document.getElementById("err-password").textContent = "Password is required.";
+          passwordInput.classList.add("is-invalid");
+          hasError = true;
+        }
+
+        if (hasError) return;
+
+        btnSubmit.disabled = true;
+        btnText.textContent = "Signing In...";
+
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ email: email, password: password })
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (res.ok && data.access_token) {
+            showAlert("Login successful! Loading dashboard...", "success");
+            localStorage.setItem("token", data.access_token);
+            if (data.user) {
+              localStorage.setItem("user", JSON.stringify(data.user));
+            }
+            setTimeout(() => {
+              window.location.href = "/";
+            }, 600);
+          } else if (res.status === 401) {
+            showAlert("Incorrect email or password. Please verify your credentials.", "danger");
+            passwordInput.value = "";
+            passwordInput.focus();
+            btnSubmit.disabled = false;
+            btnText.textContent = "Sign In";
+          } else {
+            showAlert(data.detail || "Authentication failed. Please check your credentials.", "danger");
+            btnSubmit.disabled = false;
+            btnText.textContent = "Sign In";
+          }
+        } catch (err) {
+          showAlert("Network connection error. Please verify the backend is running and try again.", "danger");
+          btnSubmit.disabled = false;
+          btnText.textContent = "Sign In";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -2,12 +2,13 @@
 FallGuard AI - Pydantic Request & Response Schemas
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 import re
 
 E164_PHONE = re.compile(r"^\+[1-9]\d{7,14}$")
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
 
 class UserLogin(BaseModel):
@@ -17,7 +18,10 @@ class UserLogin(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, v: str) -> str:
-        return v.strip().lower()
+        clean = v.strip().lower()
+        if not EMAIL_REGEX.match(clean):
+            raise ValueError("Invalid email format.")
+        return clean
 
 
 class UserRegister(BaseModel):
@@ -27,18 +31,24 @@ class UserRegister(BaseModel):
     confirm_password: Optional[str] = None
     role: Optional[str] = "PATIENT"
     phone_number: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_email: Optional[str] = None
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, v: str) -> str:
-        return v.strip().lower()
+    def validate_and_normalize_email(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if not EMAIL_REGEX.match(clean):
+            raise ValueError("Invalid email format.")
+        return clean
 
     @field_validator("name")
     @classmethod
     def strip_name(cls, v: str) -> str:
         cleaned = v.strip()
-        if not cleaned:
-            raise ValueError("Name is required.")
+        if len(cleaned) < 2:
+            raise ValueError("Name must be at least 2 characters.")
         return cleaned
 
     @field_validator("password")
@@ -47,6 +57,12 @@ class UserRegister(BaseModel):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters.")
         return v
+
+    @model_validator(mode="after")
+    def check_passwords_match(self):
+        if self.confirm_password is not None and self.password != self.confirm_password:
+            raise ValueError("Password confirmation does not match password.")
+        return self
 
 
 class UserResponse(BaseModel):

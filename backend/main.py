@@ -87,6 +87,22 @@ if STATIC_DIR.exists():
             return FileResponse(index_path)
         return JSONResponse({"message": "FallGuard AI Backend Running. Dashboard index.html not found."})
 
+    @app.get("/login", include_in_schema=False)
+    @app.get("/login.html", include_in_schema=False)
+    async def serve_login():
+        login_path = STATIC_DIR / "login.html"
+        if login_path.exists():
+            return FileResponse(login_path)
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/signup", include_in_schema=False)
+    @app.get("/signup.html", include_in_schema=False)
+    async def serve_signup():
+        signup_path = STATIC_DIR / "signup.html"
+        if signup_path.exists():
+            return FileResponse(signup_path)
+        return FileResponse(STATIC_DIR / "index.html")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

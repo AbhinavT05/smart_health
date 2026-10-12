@@ -51,7 +51,7 @@ async def run_e2e_smartphone_test():
         "emergency_contact_email": "thomas.vance@family.org"
     }
     reg_res = requests.post(f"{API_URL}/api/auth/register", json=reg_payload)
-    assert reg_res.status_code == 200, f"Registration failed: {reg_res.text}"
+    assert reg_res.status_code in (200, 201), f"Registration failed: {reg_res.text}"
     auth_data = reg_res.json()
     jwt_token = auth_data["access_token"]
     user_id = auth_data["user"]["id"]

@@ -3,13 +3,26 @@ FallGuard AI - Authentication API Endpoints
 """
 
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+
 from backend.database.session import get_db
-from backend.schemas.schemas import UserLogin, TokenResponse, UserResponse
+from backend.schemas.schemas import (
+    UserLogin,
+    UserRegister,
+    TokenResponse,
+    UserResponse,
+    LegacyEmergencyContactUpdate,
+    DeviceStatus,
+    DeviceResponse,
+    DeviceRegisterRequest,
+)
 from backend.services.auth_service import auth_service
+from backend.services.sensor_stream_manager import sensor_stream_manager
+from backend.core.security import hash_password
 from backend.api.dependencies import get_current_user
-from backend.models.db_models import User
+from backend.models.db_models import User, Device, EmergencyContact
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -24,46 +37,64 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         )
     return token_resp
 
-class UserRegister(UserLogin):
-    name: str
-    phone_number: Optional[str] = None
-    emergency_contact_name: Optional[str] = None
-    emergency_contact_phone: Optional[str] = None
-    emergency_contact_email: Optional[str] = None
-
-from backend.schemas.schemas import LegacyEmergencyContactUpdate, DeviceStatus, DeviceResponse, DeviceRegisterRequest
-from backend.services.sensor_stream_manager import sensor_stream_manager
-from backend.core.security import hash_password
-from backend.models.db_models import Device, EmergencyContact
-from datetime import datetime, timezone
-
-@router.post("/register", response_model=TokenResponse)
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """Register a new user account. Role is strictly assigned server-side as PATIENT to prevent privilege escalation."""
-    existing = db.query(User).filter(User.email == user_data.email.strip().lower()).first()
+    clean_email = user_data.email.strip().lower()
+    existing = db.query(User).filter(User.email == clean_email).first()
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Email is already registered."
         )
     # Server-side safe role assignment: public users can NEVER register as ADMIN or any privileged role
     safe_role = "PATIENT"
-    user = User(
-        name=user_data.name.strip(),
-        email=user_data.email.strip().lower(),
-        hashed_password=hash_password(user_data.password),
-        role=safe_role,
-        phone_number=user_data.phone_number,
-        emergency_contact_name=user_data.emergency_contact_name,
-        emergency_contact_phone=user_data.emergency_contact_phone,
-        emergency_contact_email=user_data.emergency_contact_email
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        user = User(
+            name=user_data.name.strip(),
+            email=clean_email,
+            hashed_password=hash_password(user_data.password),
+            role=safe_role,
+            phone_number=user_data.phone_number,
+            share_location=True,
+            emergency_contact_name=user_data.emergency_contact_name,
+            emergency_contact_phone=user_data.emergency_contact_phone,
+            emergency_contact_email=user_data.emergency_contact_email,
+            created_at=datetime.utcnow()
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
-    login_data = UserLogin(email=user_data.email, password=user_data.password)
-    return auth_service.authenticate_user(db, login_data)
+        if user_data.emergency_contact_name and user_data.emergency_contact_phone:
+            contact = EmergencyContact(
+                user_id=user.id,
+                name=user_data.emergency_contact_name.strip(),
+                phone_number=user_data.emergency_contact_phone.strip(),
+                relationship_label="Primary Contact",
+                channel="sms",
+                selected=True,
+                verified=True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            db.add(contact)
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error during user registration: {str(exc)}"
+        )
+
+    login_data = UserLogin(email=clean_email, password=user_data.password)
+    token_resp = auth_service.authenticate_user(db, login_data)
+    if not token_resp:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration completed, but token generation failed."
+        )
+    return token_resp
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):

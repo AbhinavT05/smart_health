@@ -52,6 +52,11 @@ class FallDetector:
         self.buffer = deque(maxlen=self.window_size)
         self.load_model()
 
+    @property
+    def model(self):
+        """Backward-compatible alias for primary classifier."""
+        return self.rf_model
+
     def load_model(self) -> bool:
         """Load the hybrid RF+SVM bundle. Returns False if unavailable (never falls back)."""
         self.available = False
