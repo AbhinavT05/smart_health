@@ -70,14 +70,22 @@ class Settings:
     def uses_default_secret(self) -> bool:
         return not self.SECRET_KEY or self.SECRET_KEY in (
             "fallguard-super-secret-key-change-in-production-2026",
+            "dev-only-insecure-secret-set-SECRET_KEY-in-dotenv",
+            "secret",
+            "changeme",
         )
 
     @property
     def resolved_secret(self) -> str:
+        if self.ENVIRONMENT == "production":
+            if self.uses_default_secret() or len(self.SECRET_KEY) < 32:
+                raise RuntimeError(
+                    "Production startup rejected: Insecure or missing SECRET_KEY. "
+                    "A strong SECRET_KEY (at least 32 characters) must be configured in production."
+                )
+            return self.SECRET_KEY
         if self.SECRET_KEY:
             return self.SECRET_KEY
-        if self.ENVIRONMENT == "production":
-            raise RuntimeError("SECRET_KEY must be set in production.")
         return "dev-only-insecure-secret-set-SECRET_KEY-in-dotenv"
 
     def emergency_mode(self) -> str:

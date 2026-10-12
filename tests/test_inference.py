@@ -10,69 +10,109 @@ from ml.inference.predictor import FallDetector
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-def test_inference_normal_activity():
-    detector = FallDetector()
-    
-    # 128 samples of normal walking
-    t = np.linspace(0, 2.56, 128)
-    ax = 0.2 * np.sin(2 * np.pi * 1.8 * t)
-    ay = 0.3 * np.cos(2 * np.pi * 1.8 * t)
-    az = 0.98 + 0.2 * np.sin(4 * np.pi * 1.8 * t)
-    gx = 0.3 * np.sin(2 * np.pi * 1.8 * t)
-    gy = 0.2 * np.cos(2 * np.pi * 1.8 * t)
-    gz = 0.1 * np.sin(2 * np.pi * 1.8 * t)
-    
-    pred = detector.predict_window(ax, ay, az, gx, gy, gz)
-    
-    assert "activity" in pred
-    assert "confidence" in pred
-    assert "risk_level" in pred
-    assert "is_fall" in pred
-    assert pred["is_fall"] is False
-    assert pred["risk_level"] in ("LOW", "MEDIUM")
+def test_inference_missing_model_unavailable():
+    """Verify missing model artifacts result in an explicit unavailable state."""
+    detector = FallDetector(model_path=BASE_DIR / "nonexistent" / "model.joblib")
+    assert detector.available is False
+    assert detector.unavailable_reason is not None
 
-def test_inference_severe_fall():
-    detector = FallDetector()
-    
-    # Check if real dataset exists
-    stream_csv = BASE_DIR / "data" / "processed" / "unified_sensor_stream.csv"
-    if stream_csv.exists():
-        df = pd.read_csv(stream_csv)
-        fall_sample = df[df["is_fall"] == 1]
-        if not fall_sample.empty:
-            w_id = fall_sample["window_id"].iloc[0]
-            w_df = fall_sample[fall_sample["window_id"] == w_id].sort_values("step")
-            
-            pred = detector.predict_window(
-                acc_x=w_df["acc_x"].to_numpy(),
-                acc_y=w_df["acc_y"].to_numpy(),
-                acc_z=w_df["acc_z"].to_numpy(),
-                gyro_x=w_df["gyro_x"].to_numpy(),
-                gyro_y=w_df["gyro_y"].to_numpy(),
-                gyro_z=w_df["gyro_z"].to_numpy()
-            )
-            assert pred["is_fall"] is True
-            assert pred["risk_level"] == "HIGH"
-            assert pred["activity"] == "FALL"
-            return
-            
-    # Synthetic kinematic shock pulse test
-    ax = np.random.normal(0.05, 0.05, 128)
-    ay = np.random.normal(0.10, 0.05, 128)
-    az = np.random.normal(0.98, 0.05, 128)
-    gx = np.random.normal(0.0, 0.05, 128)
-    gy = np.random.normal(0.0, 0.05, 128)
-    gz = np.random.normal(0.0, 0.05, 128)
-    
-    pulse = np.exp(-((np.arange(128) - 60)**2) / 6.0)
-    ax += 4.2 * pulse
-    ay += 3.1 * pulse
-    az += -4.5 * pulse
-    gx += 4.8 * pulse
-    gy += 3.6 * pulse
-    gz += 2.9 * pulse
-    
+    ax = np.zeros(128)
+    ay = np.zeros(128)
+    az = np.ones(128)
+    gx = np.zeros(128)
+    gy = np.zeros(128)
+    gz = np.zeros(128)
+
     pred = detector.predict_window(ax, ay, az, gx, gy, gz)
-    assert pred["is_fall"] is True
-    assert pred["risk_level"] == "HIGH"
-    assert pred["activity"] == "FALL"
+    assert pred["model_available"] is False
+    assert pred["activity"] == "UNAVAILABLE"
+    assert pred["risk_level"] == "UNKNOWN"
+    assert pred["is_fall"] is False
+    assert pred["confidence"] == 0.0
+    assert pred["unavailable_reason"] is not None
+
+
+def test_hybrid_fusion_calculation():
+    """Verify hybrid fusion probability math: P = w_rf*p_rf + w_svm*p_svm."""
+    from ml.inference.hybrid_fusion import fuse_fall_probability
+
+    # Normal activity below threshold
+    res_normal = fuse_fall_probability(
+        p_rf_fall=0.10,
+        p_svm_fall=0.20,
+        weight_rf=0.50,
+        weight_svm=0.50,
+        threshold=0.50,
+    )
+    assert res_normal["is_fall"] is False
+    assert res_normal["activity"] == "NON_FALL"
+    assert res_normal["hybrid_fall_probability"] == 0.15
+
+    # Severe fall above threshold
+    res_fall = fuse_fall_probability(
+        p_rf_fall=0.90,
+        p_svm_fall=0.80,
+        weight_rf=0.60,
+        weight_svm=0.40,
+        threshold=0.50,
+    )
+    assert res_fall["is_fall"] is True
+    assert res_fall["activity"] == "FALL"
+    assert res_fall["hybrid_fall_probability"] == 0.86
+
+
+def test_hybrid_inference_with_mock_bundle(tmp_path):
+    """Verify FallDetector executes hybrid RF + SVM inference correctly when bundle is present."""
+    import joblib
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.svm import SVC
+    from sklearn.preprocessing import StandardScaler
+    from ml.features.feature_engineering import extract_features_from_window
+
+    # Create synthetic feature vector
+    ax = np.zeros(128)
+    ay = np.zeros(128)
+    az = np.ones(128)
+    gx = np.zeros(128)
+    gy = np.zeros(128)
+    gz = np.zeros(128)
+
+    feats = extract_features_from_window(ax, ay, az, gx, gy, gz, sampling_rate=50.0)
+    feat_names = sorted(list(feats.keys()))
+
+    X = np.random.randn(20, len(feat_names))
+    y = np.array(["WALKING", "FALL"] * 10)
+
+    scaler = StandardScaler().fit(X)
+    X_scaled = scaler.transform(X)
+
+    rf = RandomForestClassifier(n_estimators=5, random_state=42).fit(X, y)
+    svm = SVC(probability=True, random_state=42).fit(X_scaled, y)
+
+    bundle_path = tmp_path / "test_hybrid.joblib"
+    joblib.dump({
+        "rf_model": rf,
+        "svm_model": svm,
+        "scaler": scaler,
+        "feature_names": feat_names,
+        "classes": list(rf.classes_),
+        "fall_class_idx": list(rf.classes_).index("FALL"),
+        "model_name": "Hybrid Random Forest + SVM",
+        "model_version": "2.0.0-test",
+        "fusion": {
+            "method": "probability_weighted_sum",
+            "weight_rf": 0.50,
+            "weight_svm": 0.50,
+            "threshold": 0.50,
+        }
+    }, bundle_path)
+
+    detector = FallDetector(model_path=bundle_path)
+    assert detector.available is True
+
+    pred = detector.predict_window(ax, ay, az, gx, gy, gz)
+    assert pred["model_available"] is True
+    assert pred["activity"] in ("FALL", "WALKING", "NON_FALL")
+    assert "hybrid_fall_probability" in pred
+    assert pred["rf_fall_probability"] is not None
+    assert pred["svm_fall_probability"] is not None

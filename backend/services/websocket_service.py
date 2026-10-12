@@ -50,7 +50,7 @@ class ConnectionManager:
 
     async def broadcast_to_user(self, user_id: Optional[int], message: Dict[str, Any]):
         if user_id is None:
-            await self.broadcast(message)
+            logger.warning("broadcast_to_user called with user_id=None; suppressing private event broadcast.")
             return
         payload = dict(message)
         payload["user_id"] = user_id
@@ -59,7 +59,8 @@ class ConnectionManager:
         dead_monitors = []
         for connection in self.active_connections:
             owner = self.monitor_users.get(connection)
-            if owner is not None and owner != user_id:
+            # STRICT ISOLATION: Only send to monitors explicitly authenticated as this user
+            if owner != user_id:
                 continue
             try:
                 await connection.send_text(json_data)
@@ -72,7 +73,8 @@ class ConnectionManager:
         if msg_type in ("FALL_PENDING_CONFIRMATION", "FALL_CONFIRMATION_RESOLVED", "FALL_ALERT", "MODEL_UNAVAILABLE", "HELP_RESULT"):
             dead_devices = []
             for dev_id, dev_ws in list(self.device_connections.items()):
-                if self.device_users.get(dev_id) not in (user_id, None):
+                # STRICT ISOLATION: Only send to devices explicitly registered to this user
+                if self.device_users.get(dev_id) != user_id:
                     continue
                 try:
                     await dev_ws.send_text(json_data)
@@ -82,6 +84,9 @@ class ConnectionManager:
                 self.unregister_device(dead_dev)
 
     async def broadcast(self, message: Dict[str, Any]):
+        """
+        Broadcast public system announcements only. Never use for user-specific telemetry or fall alerts.
+        """
         json_data = json.dumps(message, default=str)
         disconnected = []
         for connection in self.active_connections:
@@ -91,19 +96,6 @@ class ConnectionManager:
                 disconnected.append(connection)
         for dead_conn in disconnected:
             self.disconnect(dead_conn)
-
-        if message.get("type") in ("FALL_PENDING_CONFIRMATION", "FALL_CONFIRMATION_RESOLVED", "FALL_ALERT"):
-            target_user = message.get("user_id") or (message.get("event") or {}).get("user_id")
-            dead_devices = []
-            for dev_id, dev_ws in list(self.device_connections.items()):
-                if target_user is not None and self.device_users.get(dev_id) not in (target_user, None):
-                    continue
-                try:
-                    await dev_ws.send_text(json_data)
-                except Exception:
-                    dead_devices.append(dev_id)
-            for dead_dev in dead_devices:
-                self.unregister_device(dead_dev)
 
 
 ws_manager = ConnectionManager()

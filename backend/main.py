@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from backend.core.config import settings
 from backend.core.logger import app_logger
 from backend.database.init_db import init_db
-from backend.api.routes import auth, predictions, falls, activities, dashboard, simulation, model, ws
+from backend.api.routes import auth, predictions, falls, activities, dashboard, simulation, model, ws, contacts
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,6 +24,10 @@ async def lifespan(app: FastAPI):
     app_logger.info(f"[CONFIG] Environment: {settings.ENVIRONMENT} | Debug: {settings.DEBUG}")
     app_logger.info("=" * 60)
     
+    # Validate production JWT secret
+    if settings.ENVIRONMENT == "production":
+        _ = settings.resolved_secret
+
     # Initialize DB & seed default accounts
     init_db()
     
@@ -43,7 +47,7 @@ app = FastAPI(
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,6 +55,7 @@ app.add_middleware(
 
 # Include API Routers
 app.include_router(auth.router, prefix="/api")
+app.include_router(contacts.router, prefix="/api")
 app.include_router(predictions.router, prefix="/api")
 app.include_router(falls.router, prefix="/api")
 app.include_router(activities.router, prefix="/api")

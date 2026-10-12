@@ -37,14 +37,19 @@ def get_model_info():
 
     return ModelInfoResponse(
         model_name=detector.model_name,
-        model_version=detector.model_bundle.get("model_version", "1.0.0") if detector.model_bundle else "1.0.0",
-        trained_at=detector.model_bundle.get("trained_at", "N/A") if detector.model_bundle else "N/A",
+        model_version=detector.model_bundle.get("model_version", detector.model_version) if detector.model_bundle else detector.model_version,
+        model_available=detector.available,
+        unavailable_reason=detector.unavailable_reason,
+        trained_at=detector.model_bundle.get("trained_at", None) if detector.model_bundle else None,
         features_count=len(detector.feature_names),
-        classes=detector.classes or ["FALL", "WALKING", "SITTING", "STANDING", "LAYING", "WALKING_UPSTAIRS", "WALKING_DOWNSTAIRS"],
+        classes=detector.classes if detector.classes else ["FALL", "NON_FALL"],
         window_size_seconds=settings.WINDOW_SIZE_SECONDS,
         sampling_rate=settings.SAMPLING_RATE,
+        fusion=detector.fusion_config if detector.available else None,
         metrics=metrics,
-        feature_importance_top10=top10_feats
+        feature_importance_top10=top10_feats,
+        alert_cooldown_seconds=settings.ALERT_COOLDOWN_SECONDS,
+        confirmation_timeout_seconds=settings.FALL_CONFIRMATION_TIMEOUT_SECONDS,
     )
 
 @router.get("/comparisons")

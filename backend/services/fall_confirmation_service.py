@@ -219,7 +219,12 @@ class FallConfirmationService:
             fall.confirmed = True
             fall.event_kind = "CONFIRMED_FALL"
 
-            user = db.query(User).filter(User.id == fall.user_id).first() if fall.user_id else None
+            user = None
+            if fall.user_id:
+                user = db.query(User).filter(User.id == fall.user_id).first()
+            if not user:
+                user = db.query(User).first()
+
             location_dict = None
             if fall.location_lat is not None and fall.location_lon is not None:
                 location_dict = {"lat": fall.location_lat, "lon": fall.location_lon}
@@ -233,6 +238,9 @@ class FallConfirmationService:
                 )
             else:
                 logger.info("Confirmed fall #%s has no owning user; contacts were not notified.", fall.id)
+
+            db.commit()
+            db.refresh(fall)
 
             await ws_manager.broadcast_to_user(fall.user_id, {
                 "type": "FALL_CONFIRMATION_RESOLVED",

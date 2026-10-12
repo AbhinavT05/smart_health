@@ -27,15 +27,71 @@ router = APIRouter(tags=["WebSockets"])
 logger = logging.getLogger("WebSocketRoute")
 
 @router.websocket("/ws/monitor")
-async def websocket_monitor_endpoint(websocket: WebSocket):
+async def websocket_monitor_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None)
+):
     """
     Real-time streaming telemetry and instant fall alert push endpoint for dashboard UI.
+    Requires validated JWT token via query parameter or immediate auth handshake frame.
     """
-    await ws_manager.connect(websocket)
+    await websocket.accept()
+    jwt_token = token
+    if not jwt_token:
+        # Check for initial auth handshake frame within 4 seconds
+        try:
+            auth_text = await asyncio.wait_for(websocket.receive_text(), timeout=4.0)
+            auth_packet = json.loads(auth_text)
+            if auth_packet.get("type") == "auth":
+                jwt_token = auth_packet.get("token")
+        except Exception:
+            pass
+
+    if not jwt_token:
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "code": "AUTH_REQUIRED",
+            "message": "Authentication token missing. Provide token query parameter or auth handshake."
+        }))
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    payload = decode_access_token(jwt_token)
+    if not payload or not payload.get("sub"):
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "code": "AUTH_FAILED",
+            "message": "Invalid or expired JWT token."
+        }))
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    user_id = int(payload["sub"])
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "code": "USER_NOT_FOUND",
+                "message": f"User ID {user_id} not found."
+            }))
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        user_name = user.name
+    finally:
+        db.close()
+
+    await ws_manager.connect(websocket, user_id=user_id)
+    await websocket.send_text(json.dumps({
+        "type": "auth_success",
+        "user_id": user_id,
+        "user_name": user_name
+    }))
+
     try:
         while True:
             data = await websocket.receive_text()
-            # Dashboard ping/keepalive or commands
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "ping":
@@ -109,7 +165,7 @@ async def websocket_smartphone_sensor_endpoint(
             return
 
         # Step 2: Register Device & Initialize Isolated Bounded Ring Buffer
-        ws_manager.register_device(dev_id, websocket)
+        ws_manager.register_device(dev_id, websocket, user_id=user.id)
         buffer = sensor_stream_manager.get_or_create_buffer(device_id=dev_id, user_id=user.id, source_type="REAL_PHONE")
         buffer.connected = True
 
@@ -129,8 +185,8 @@ async def websocket_smartphone_sensor_endpoint(
             "confirmation_timeout_seconds": settings.FALL_CONFIRMATION_TIMEOUT_SECONDS
         }))
 
-        # Notify dashboard of device connection
-        await ws_manager.broadcast({
+        # Notify user dashboard of device connection
+        await ws_manager.broadcast_to_user(user.id, {
             "type": "DEVICE_STATUS_UPDATE",
             "data": buffer.get_status()
         })
@@ -193,10 +249,10 @@ async def websocket_smartphone_sensor_endpoint(
                     location=loc
                 )
 
-                # Broadcast live sensor waveform point every 2 samples (25Hz update rate for smooth UI)
+                # Broadcast live sensor waveform point to authenticated user monitor
                 if buffer.total_samples_received % 2 == 0:
                     acc_mag = np.sqrt(norm_reading[1]**2 + norm_reading[2]**2 + norm_reading[3]**2)
-                    await ws_manager.broadcast({
+                    await ws_manager.broadcast_to_user(user.id, {
                         "type": "SENSOR_TICK",
                         "data": {
                             "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3],
@@ -238,13 +294,14 @@ async def websocket_smartphone_sensor_endpoint(
     finally:
         ws_manager.unregister_device(dev_id)
         sensor_stream_manager.set_device_connection(dev_id, user.id if user else None, False)
-        # Broadcast status update
-        await ws_manager.broadcast({
-            "type": "DEVICE_STATUS_UPDATE",
-            "data": {
-                "device_id": dev_id,
-                "connected": False,
-                "last_seen": datetime.now(timezone.utc).isoformat()
-            }
-        })
+        # Broadcast status update strictly to device owner
+        if user:
+            await ws_manager.broadcast_to_user(user.id, {
+                "type": "DEVICE_STATUS_UPDATE",
+                "data": {
+                    "device_id": dev_id,
+                    "connected": False,
+                    "last_seen": datetime.now(timezone.utc).isoformat()
+                }
+            })
         db.close()

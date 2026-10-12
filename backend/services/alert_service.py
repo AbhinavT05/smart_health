@@ -86,8 +86,10 @@ class SimulationEmergencyProvider(BaseEmergencyProvider):
             "user_name": user_name,
             "contact_name": contact_name,
             "contact_phone_masked": _mask_phone(contact_phone),
+            "contact_phone": contact_phone,
             "channel": channel,
             "event_id": event.get("fall_id"),
+            "event": event,
         }
         self.dispatched_alerts.append(incident)
         logger.info(
@@ -228,12 +230,29 @@ class AlertService:
         return True
 
     def selected_contacts(self, db: Session, user_id: int) -> List[EmergencyContact]:
-        return (
+        contacts = (
             db.query(EmergencyContact)
             .filter(EmergencyContact.user_id == user_id, EmergencyContact.selected == True)  # noqa: E712
             .order_by(EmergencyContact.id.asc())
             .all()
         )
+        if not contacts:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and user.emergency_contact_name and user.emergency_contact_phone:
+                legacy = EmergencyContact(
+                    user_id=user.id,
+                    name=user.emergency_contact_name,
+                    phone_number=user.emergency_contact_phone,
+                    relationship_label="Primary Contact",
+                    channel="sms",
+                    selected=True,
+                    verified=True,
+                )
+                db.add(legacy)
+                db.commit()
+                db.refresh(legacy)
+                contacts = [legacy]
+        return contacts
 
     def _compose_message(self, user: User, event_kind: str, timestamp: datetime, location: Optional[Dict[str, float]]) -> str:
         kind = "manual help request" if event_kind == "MANUAL_HELP" else "confirmed fall"
