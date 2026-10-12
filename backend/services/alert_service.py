@@ -414,7 +414,9 @@ class AlertService:
                 "gyro_peak": gyro_peak,
             },
         }
-        await ws_manager.broadcast_to_user(user_id, ws_payload) if user_id else await ws_manager.broadcast(ws_payload)
+        # Fall events are private. Ownerless legacy/system events must never be
+        # sent to every connected dashboard.
+        await ws_manager.broadcast_to_user(user_id, ws_payload)
         return fall_event
 
     def acknowledge_fall(

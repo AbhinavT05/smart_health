@@ -31,6 +31,7 @@ class SimulationService:
         self._task: Optional[asyncio.Task] = None
         self._sliding_buffer = deque(maxlen=128)
         self._manual_fall_injected: bool = False
+        self.user_id: Optional[int] = None
 
     def get_status(self) -> Dict[str, Any]:
         return {
@@ -44,19 +45,23 @@ class SimulationService:
             "current_risk": self.current_risk
         }
 
-    async def start(self, scenario: str = "mixed_activities_with_fall", playback_speed: float = 1.0):
-        if self.is_running:
+    async def start(self, scenario: str = "mixed_activities_with_fall", playback_speed: float = 1.0, user_id: Optional[int] = None):
+        if self._task and not self._task.done():
             self.stop()
-            await asyncio.sleep(0.1)
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
             
         self.scenario = scenario
+        self.user_id = user_id
         self.playback_speed = max(0.2, min(playback_speed, 10.0))
         self.is_running = True
         self.is_paused = False
         self.samples_replayed = 0
         self._sliding_buffer.clear()
         
-        self._task = asyncio.create_task(self._simulation_loop())
+        self._task = asyncio.create_task(self._simulation_loop(user_id))
         logger.info(f"Started simulation scenario: '{scenario}' at {playback_speed}x speed.")
 
     def stop(self):
@@ -79,7 +84,7 @@ class SimulationService:
         self._manual_fall_injected = True
         logger.info("Manual high-impact fall signature injected into stream.")
 
-    async def _simulation_loop(self):
+    async def _simulation_loop(self, user_id: Optional[int]):
         gen = generate_sensor_stream_generator(scenario=self.scenario)
         db = SessionLocal()
         
@@ -137,7 +142,7 @@ class SimulationService:
                             "ground_truth": reading.get("ground_truth", "NORMAL")
                         }
                     }
-                    await ws_manager.broadcast(ws_point)
+                    await ws_manager.broadcast_to_user(user_id, ws_point)
                     
                 # Run sliding window prediction every 10 samples (every 0.2s) once buffer has minimum 64 samples
                 if len(self._sliding_buffer) >= 64 and step_counter % 10 == 0:
@@ -156,7 +161,8 @@ class SimulationService:
                         acc_z=arr_padded[:, 2].tolist(),
                         gyro_x=arr_padded[:, 3].tolist(),
                         gyro_y=arr_padded[:, 4].tolist(),
-                        gyro_z=arr_padded[:, 5].tolist()
+                        gyro_z=arr_padded[:, 5].tolist(),
+                        user_id=user_id,
                     )
                     self.current_activity = pred["activity"]
                     self.current_risk = pred["risk_level"]

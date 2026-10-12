@@ -64,6 +64,7 @@
           <label for="phone">Phone Number <span class="optional">(Optional)</span></label>
           <input type="tel" id="phone" name="phone_number" class="form-control" placeholder="+15551234567" autocomplete="tel">
           <span class="help-text">International format (e.g. +15550123) for SMS fall escalation.</span>
+          <span class="field-error" id="err-phone"></span>
         </div>
 
         <div class="form-group">
@@ -74,6 +75,13 @@
         <div class="form-group">
           <label for="emergency-phone">Emergency Contact Phone <span class="optional">(Optional)</span></label>
           <input type="tel" id="emergency-phone" name="emergency_contact_phone" class="form-control" placeholder="+15550199">
+          <span class="field-error" id="err-emergency-phone"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="emergency-email">Emergency Contact Email <span class="optional">(Optional)</span></label>
+          <input type="email" id="emergency-email" name="emergency_contact_email" class="form-control" placeholder="contact@example.com" autocomplete="email">
+          <span class="field-error" id="err-emergency-email"></span>
         </div>
 
         <button type="submit" class="btn btn-primary btn-block" id="btn-submit">
@@ -131,6 +139,7 @@
         const phone = document.getElementById("phone").value.trim();
         const emergencyName = document.getElementById("emergency-name").value.trim();
         const emergencyPhone = document.getElementById("emergency-phone").value.trim();
+        const emergencyEmail = document.getElementById("emergency-email").value.trim().toLowerCase();
 
         let hasError = false;
 
@@ -163,6 +172,22 @@
           hasError = true;
         }
 
+        if (emergencyEmail && !emailRegex.test(emergencyEmail)) {
+          setFieldError("emergency-email", "err-emergency-email", "Please enter a valid emergency contact email.");
+          hasError = true;
+        }
+
+        if (hasError) return;
+
+        const phoneRegex = /^\+[1-9]\d{7,14}$/;
+        if (phone && !phoneRegex.test(phone.replace(/\s/g, ""))) {
+          setFieldError("phone", "err-phone", "Use an international number such as +15551234567.");
+          hasError = true;
+        }
+        if (emergencyPhone && !phoneRegex.test(emergencyPhone.replace(/\s/g, ""))) {
+          setFieldError("emergency-phone", "err-emergency-phone", "Use an international number such as +15551234567.");
+          hasError = true;
+        }
         if (hasError) return;
 
         // Prevent duplicate submissions
@@ -176,9 +201,10 @@
           confirm_password: confirmPassword,
           role: "PATIENT"
         };
-        if (phone) payload.phone_number = phone;
+        if (phone) payload.phone_number = phone.replace(/\s/g, "");
         if (emergencyName) payload.emergency_contact_name = emergencyName;
-        if (emergencyPhone) payload.emergency_contact_phone = emergencyPhone;
+        if (emergencyPhone) payload.emergency_contact_phone = emergencyPhone.replace(/\s/g, "");
+        if (emergencyEmail) payload.emergency_contact_email = emergencyEmail;
 
         try {
           const res = await fetch("/api/auth/register", {

@@ -27,16 +27,26 @@ class FallGuardApp {
     this.liveAccChart = null;
     this.liveGyroChart = null;
 
-    this.token = localStorage.getItem("token");
+    // Bearer tokens are kept for this browser tab's session. Migrate tokens
+    // created by older versions without forcing users to paste them again.
+    this.token = sessionStorage.getItem("token") || localStorage.getItem("token");
+    if (this.token && !sessionStorage.getItem("token")) {
+      sessionStorage.setItem("token", this.token);
+      localStorage.removeItem("token");
+    }
     this.init();
   }
 
-  init() {
+  async init() {
     if (!this.token) {
       window.location.href = "/login";
       return;
     }
-    this.renderUserProfile();
+    const profileResponse = await this.authFetch("/api/auth/me");
+    if (!profileResponse || !profileResponse.ok) return;
+    const profile = await profileResponse.json();
+    sessionStorage.setItem("user", JSON.stringify(profile));
+    this.renderUserProfile(profile);
     this.bindEvents();
     this.initCharts();
     this.connectWebSocket();
@@ -52,9 +62,9 @@ class FallGuardApp {
     }, 4000);
   }
 
-  renderUserProfile() {
+  renderUserProfile(authenticatedUser = null) {
     try {
-      const stored = localStorage.getItem("user");
+      const stored = authenticatedUser ? JSON.stringify(authenticatedUser) : sessionStorage.getItem("user");
       if (stored) {
         const user = JSON.parse(stored);
         if (user.name) {
@@ -73,6 +83,10 @@ class FallGuardApp {
   }
 
   async authFetch(url, options = {}) {
+    if (!this.token) {
+      this.redirectToLogin("expired");
+      return null;
+    }
     const headers = {
       ...(options.headers || {}),
       "Authorization": `Bearer ${this.token}`
@@ -80,9 +94,7 @@ class FallGuardApp {
     try {
       const res = await fetch(url, { ...options, headers });
       if (res.status === 401) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        window.location.href = "/login";
+        this.redirectToLogin("expired");
         return null;
       }
       return res;
@@ -92,13 +104,19 @@ class FallGuardApp {
     }
   }
 
+  redirectToLogin(reason = "expired") {
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    window.location.replace(`/login?reason=${encodeURIComponent(reason)}`);
+  }
+
   // --- UI Event Binding ---
   bindEvents() {
     // Logout button
     document.getElementById("btn-logout")?.addEventListener("click", () => {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      window.location.href = "/login";
+      this.redirectToLogin("logout");
     });
     // Navigation tabs
     document.querySelectorAll(".nav-item").forEach(btn => {
@@ -191,12 +209,14 @@ class FallGuardApp {
   // --- WebSocket Connection ---
   connectWebSocket() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/monitor${this.token ? `?token=${encodeURIComponent(this.token)}` : ''}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/monitor`;
 
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
       console.log("[WS] Connected to FallGuard telemetry server.");
+      // Keep the dashboard JWT out of browser history, proxy logs and URL logs.
+      this.ws.send(JSON.stringify({ type: "auth", token: this.token }));
       const pill = document.getElementById("ws-status-pill");
       const text = document.getElementById("ws-status-text");
       pill.className = "connection-status-pill connected";

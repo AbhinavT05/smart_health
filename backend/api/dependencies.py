@@ -23,10 +23,18 @@ def get_current_user_optional(
     payload = decode_access_token(token)
     if not payload:
         return None
-    user_id = payload.get("sub")
-    if not user_id:
+    subject = payload.get("sub")
+    if subject is None:
         return None
-    return db.query(User).filter(User.id == int(user_id)).first()
+    # Login issues the database ID as a string subject. Treat malformed or
+    # stale subjects as unauthenticated instead of leaking a 500 response.
+    try:
+        user_id = int(subject)
+    except (TypeError, ValueError):
+        return None
+    if user_id <= 0:
+        return None
+    return db.query(User).filter(User.id == user_id).first()
 
 def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),

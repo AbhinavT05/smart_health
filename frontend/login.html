@@ -93,6 +93,11 @@
 
       // Check if redirected from successful signup
       const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("reason") === "expired") {
+        showAlert("Your session expired or is no longer valid. Please sign in again.", "danger");
+      } else if (urlParams.get("reason") === "logout") {
+        showAlert("You have been signed out.", "success");
+      }
       if (urlParams.get("registered") === "1" || urlParams.get("registered") === "true") {
         showAlert("Registration successful! Please log in with your credentials.", "success");
       }
@@ -170,9 +175,9 @@
 
           if (res.ok && data.access_token) {
             showAlert("Login successful! Loading dashboard...", "success");
-            localStorage.setItem("token", data.access_token);
+            sessionStorage.setItem("token", data.access_token);
             if (data.user) {
-              localStorage.setItem("user", JSON.stringify(data.user));
+              sessionStorage.setItem("user", JSON.stringify(data.user));
             }
             setTimeout(() => {
               window.location.href = "/";
