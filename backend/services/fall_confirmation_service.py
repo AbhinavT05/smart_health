@@ -9,7 +9,7 @@ from typing import Dict, Optional, Any
 from sqlalchemy.orm import Session
 
 from backend.database.session import SessionLocal
-from backend.models.db_models import FallEvent, User
+from backend.models.db_models import Alert, FallEvent, User
 from backend.services.alert_service import alert_service
 from backend.services.websocket_service import ws_manager
 from backend.core.config import settings
@@ -148,21 +148,44 @@ class FallConfirmationService:
         db: Session,
         fall_event_id: int,
         action: str,
+        acting_user_id: int,
         location: Optional[Dict[str, float]] = None,
-        acting_user_id: Optional[int] = None,
     ) -> Optional[FallEvent]:
         action_norm = action.upper().replace(" ", "_").replace("'", "")
-        pending = self.pending_confirmations.pop(fall_event_id, None)
-        if pending and not pending.task.done():
-            pending.task.cancel()
-
-        query = db.query(FallEvent).filter(FallEvent.id == fall_event_id)
-        if acting_user_id is not None:
-            query = query.filter(FallEvent.user_id == acting_user_id)
+        query = db.query(FallEvent).filter(
+            FallEvent.id == fall_event_id,
+            FallEvent.user_id == acting_user_id,
+        )
         fall = query.first()
         if not fall:
             logger.warning("FallEvent #%s not found or not owned by user.", fall_event_id)
             return None
+
+        if fall.status in ("CANCELLED_BY_USER", "CONFIRMED"):
+            # Idempotent retries receive the existing outcome without repeating dispatch.
+            await ws_manager.broadcast_to_user(fall.user_id, {
+                "type": "FALL_CONFIRMATION_RESOLVED",
+                "user_id": fall.user_id,
+                "data": {
+                    "event_id": fall.id,
+                    "status": fall.status,
+                    "alert_dispatch_requested": bool(fall.alert_sent),
+                    "delivery_statuses": [
+                        {"channel": alert.channel, "status": alert.delivery_status, "provider": alert.provider}
+                        for alert in db.query(Alert).filter(Alert.fall_event_id == fall.id, Alert.user_id == fall.user_id).all()
+                    ],
+                },
+            })
+            return fall
+
+        # Do not let an unowned/foreign event response cancel another user's timeout.
+        pending = self.pending_confirmations.get(fall_event_id)
+        if pending and pending.user_id != acting_user_id:
+            logger.warning("User %s cannot respond to FallEvent #%s.", acting_user_id, fall_event_id)
+            return None
+        self.pending_confirmations.pop(fall_event_id, None)
+        if pending and not pending.task.done():
+            pending.task.cancel()
 
         if location:
             fall.location_lat = location.get("lat", fall.location_lat)
@@ -218,19 +241,21 @@ class FallConfirmationService:
             fall.status = "CONFIRMED"
             fall.confirmed = True
             fall.event_kind = "CONFIRMED_FALL"
+            if reason == "MANUAL_HELP_REQUEST":
+                fall.acknowledged = True
+                fall.acknowledged_at = datetime.now(timezone.utc)
+                fall.acknowledged_by = "User (Smartphone)"
 
-            user = None
-            if fall.user_id:
-                user = db.query(User).filter(User.id == fall.user_id).first()
-            if not user:
-                user = db.query(User).first()
+            # An event without an owner must never be escalated using another user's contacts.
+            user = db.query(User).filter(User.id == fall.user_id).first() if fall.user_id else None
+            alert_dispatch_requested = False
 
             location_dict = None
             if fall.location_lat is not None and fall.location_lon is not None:
                 location_dict = {"lat": fall.location_lat, "lon": fall.location_lon}
 
             if user:
-                await alert_service.dispatch_emergency_alert(
+                alert_dispatch_requested = await alert_service.dispatch_emergency_alert(
                     db=db,
                     fall_event=fall,
                     user=user,
@@ -251,8 +276,13 @@ class FallConfirmationService:
                     "event_kind": "CONFIRMED_FALL",
                     "device_id": fall.device_id,
                     "reason": reason,
-                    "message": f"Fall confirmed ({reason}). Emergency workflow executed.",
+                    "message": f"Fall confirmed ({reason}). Emergency contact workflow processing finished.",
                     "simulated": alert_service.provider.simulated,
+                    "alert_dispatch_requested": alert_dispatch_requested,
+                    "delivery_statuses": [
+                        {"channel": alert.channel, "status": alert.delivery_status, "provider": alert.provider}
+                        for alert in db.query(Alert).filter(Alert.fall_event_id == fall.id, Alert.user_id == fall.user_id).all()
+                    ],
                 },
             })
             return fall

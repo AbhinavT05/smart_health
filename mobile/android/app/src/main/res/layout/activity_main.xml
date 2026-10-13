@@ -64,6 +64,15 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="14dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MY SAFETY SUMMARY" android:textColor="@color/text_secondary" android:textSize="12sp" android:textStyle="bold" />
                 <TextView android:id="@+id/tv_dashboard_summary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Loading your private dashboard…" android:textColor="@color/text_primary" android:textSize="14sp" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_update_emergency_contact"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Update emergency contact"
+                    android:textColor="@color/text_primary"
+                    app:strokeColor="@color/text_secondary" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -145,6 +154,38 @@
                 android:singleLine="true"
                 android:textColor="@color/text_primary" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_save_backend_url"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Save URL"
+                android:textColor="@color/text_primary"
+                app:strokeColor="@color/text_secondary" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_test_backend_url"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Test connection"
+                app:cornerRadius="8dp" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/tv_backend_connection_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:accessibilityLiveRegion="polite"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"

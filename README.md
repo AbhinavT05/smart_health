@@ -320,7 +320,7 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
    .\gradlew.bat assembleDebug
    ```
 2. Install with Android Platform Tools: `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
-3. The emulator default is `http://10.0.2.2:8000`. A debug physical-phone build defaults to the current developer PC address `http://10.18.111.30:8000`; edit **Backend base URL** on the login or dashboard screen if the PC's LAN address changes. Do not use `localhost` or `127.0.0.1` from a phone.
+3. The Android Emulator defaults to `http://10.0.2.2:8000`. On a physical phone, enter the development computer's reachable LAN address (for example, `http://192.168.x.x:8000`) in **Backend base URL** on the login screen. The backend must listen on a reachable interface and the firewall must allow the connection. Do not use `localhost` or `127.0.0.1` from a phone.
 4. Start FastAPI on all interfaces with the mock alert provider:
    ```powershell
    $env:EMERGENCY_PROVIDER = "mock"

@@ -71,6 +71,9 @@ class UserResponse(BaseModel):
     email: str
     role: str
     phone_number: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_email: Optional[str] = None
     share_location: bool = True
     created_at: datetime
     selected_contact_count: int = 0

@@ -45,11 +45,12 @@
 
         <!-- High-Priority Fall Confirmation Activity (Appears over lock screen) -->
         <activity
-            android:name=".ui.FallConfirmationActivity"
+            android:name=".ui.FallAlertActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
-            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
             android:theme="@style/Theme.FallGuardAI.Alert" />
 
         <!-- Foreground Monitoring Service for continuous 50Hz sensor capture -->

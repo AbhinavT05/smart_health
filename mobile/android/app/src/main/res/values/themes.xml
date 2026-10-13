@@ -12,5 +12,8 @@
         <item name="colorPrimary">@color/danger</item>
         <item name="android:windowBackground">@color/background</item>
         <item name="android:statusBarColor">@color/danger_dark</item>
+        <item name="android:navigationBarColor">#26070B</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

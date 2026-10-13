@@ -27,6 +27,8 @@ class SignupActivity : AppCompatActivity() {
     private lateinit var error: TextView
     private lateinit var progress: ProgressBar
     private lateinit var registerButton: MaterialButton
+    private lateinit var testBackendButton: MaterialButton
+    private lateinit var backendTestStatus: TextView
     private lateinit var authApi: AuthApi
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,10 +45,39 @@ class SignupActivity : AppCompatActivity() {
         error = findViewById(R.id.tv_signup_error)
         progress = findViewById(R.id.pb_signup)
         registerButton = findViewById(R.id.btn_signup)
+        testBackendButton = findViewById(R.id.btn_test_backend)
+        backendTestStatus = findViewById(R.id.tv_backend_test)
         backendUrl.setText(BackendConfig.getBaseUrl(this))
         authApi = AuthApi(this)
         registerButton.setOnClickListener { submitRegistration() }
+        testBackendButton.setOnClickListener { testBackend() }
         findViewById<TextView>(R.id.tv_back_to_login).setOnClickListener { finish() }
+    }
+
+    private fun testBackend() {
+        val baseUrl = BackendConfig.saveBaseUrl(this, backendUrl.value())
+        if (baseUrl == null) {
+            backendTestStatus.setTextColor(getColor(R.color.danger))
+            backendTestStatus.text = "Enter a valid backend URL. Emulator: http://10.0.2.2:8000; physical phone: PC LAN URL; production: HTTPS."
+            return
+        }
+        testBackendButton.isEnabled = false
+        testBackendButton.text = "Testing…"
+        backendTestStatus.setTextColor(getColor(R.color.text_secondary))
+        backendTestStatus.text = "Checking /api/health…"
+        lifecycleScope.launch {
+            try {
+                val backendName = authApi.testConnection()
+                backendTestStatus.setTextColor(getColor(R.color.success))
+                backendTestStatus.text = "Connected to $backendName at $baseUrl."
+            } catch (error: Exception) {
+                backendTestStatus.setTextColor(getColor(R.color.danger))
+                backendTestStatus.text = error.message ?: "Backend connection test failed."
+            } finally {
+                testBackendButton.isEnabled = true
+                testBackendButton.text = "Test backend connection"
+            }
+        }
     }
 
     private fun submitRegistration() {

@@ -3,6 +3,8 @@ package com.fallguard.ai.ui
 import android.Manifest
 import android.app.AlertDialog
 import android.app.NotificationManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -15,6 +17,9 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.InputType
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -25,6 +30,7 @@ import com.fallguard.ai.R
 import com.fallguard.ai.auth.ApiException
 import com.fallguard.ai.auth.AuthApi
 import com.fallguard.ai.auth.AuthSession
+import com.fallguard.ai.auth.ApiUser
 import com.fallguard.ai.auth.BackendConfig
 import com.fallguard.ai.auth.SecureSessionStore
 import com.fallguard.ai.service.SensorForegroundService
@@ -44,13 +50,47 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etDeviceId: TextInputEditText
     private lateinit var btnToggleMonitoring: MaterialButton
     private lateinit var btnLogout: MaterialButton
+    private lateinit var btnUpdateContact: MaterialButton
+    private lateinit var btnSaveBackendUrl: MaterialButton
+    private lateinit var btnTestBackendUrl: MaterialButton
+    private lateinit var tvBackendConnectionResult: TextView
     private lateinit var session: AuthSession
+    private var signedInProfile: ApiUser? = null
     private val authApi by lazy { AuthApi(this) }
 
     private var service: SensorForegroundService? = null
     private var isMonitoringActive = false
     private var bound = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val networkManager by lazy { getSystemService(ConnectivityManager::class.java) }
+    private var lastKnownNetwork: Network? = null
+    private var networkCallbackRegistered = false
+    private val networkDashboardRefresh = Runnable {
+        if (!isFinishing && ::session.isInitialized && session.isValid()) loadDashboardOnce()
+    }
+    private val backendNetworkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            if (network == lastKnownNetwork) return
+            lastKnownNetwork = network
+            mainHandler.post {
+                if (isMonitoringActive) service?.onNetworkAvailable()
+                mainHandler.removeCallbacks(networkDashboardRefresh)
+                mainHandler.postDelayed(networkDashboardRefresh, 700L)
+            }
+        }
+
+        override fun onLost(network: Network) {
+            if (lastKnownNetwork == network) {
+                lastKnownNetwork = null
+                mainHandler.post {
+                    if (networkManager.activeNetwork == null) {
+                        tvStatus.text = "Network unavailable — waiting to reconnect"
+                        tvStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.warning))
+                    }
+                }
+            }
+        }
+    }
     private val statsRunnable = object : Runnable {
         override fun run() {
             service?.let { s ->
@@ -115,6 +155,10 @@ class MainActivity : AppCompatActivity() {
         etDeviceId = findViewById(R.id.et_device_id)
         btnToggleMonitoring = findViewById(R.id.btn_toggle_monitoring)
         btnLogout = findViewById(R.id.btn_logout)
+        btnUpdateContact = findViewById(R.id.btn_update_emergency_contact)
+        btnSaveBackendUrl = findViewById(R.id.btn_save_backend_url)
+        btnTestBackendUrl = findViewById(R.id.btn_test_backend_url)
+        tvBackendConnectionResult = findViewById(R.id.tv_backend_connection_result)
 
         etBackendUrl.setText(BackendConfig.getBaseUrl(this))
         val defaultDevice = "android_${Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)?.take(32) ?: "phone"}"
@@ -123,6 +167,72 @@ class MainActivity : AppCompatActivity() {
 
         btnToggleMonitoring.setOnClickListener { if (isMonitoringActive) stopMonitoring() else startMonitoring() }
         btnLogout.setOnClickListener { logout() }
+        btnUpdateContact.setOnClickListener { showEmergencyContactEditor() }
+        btnSaveBackendUrl.setOnClickListener { saveBackendConfiguration(testConnection = false) }
+        btnTestBackendUrl.setOnClickListener { saveBackendConfiguration(testConnection = true) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        lastKnownNetwork = networkManager.activeNetwork
+        try {
+            networkManager.registerDefaultNetworkCallback(backendNetworkCallback)
+            networkCallbackRegistered = true
+        } catch (error: Exception) {
+            tvBackendConnectionResult.text = "Network change monitoring is unavailable: ${error.message ?: "permission or platform error"}"
+        }
+    }
+
+    override fun onStop() {
+        if (networkCallbackRegistered) {
+            runCatching { networkManager.unregisterNetworkCallback(backendNetworkCallback) }
+            networkCallbackRegistered = false
+        }
+        super.onStop()
+    }
+
+    private fun saveBackendConfiguration(testConnection: Boolean) {
+        val previousUrl = BackendConfig.getBaseUrl(this)
+        val newUrl = BackendConfig.saveBaseUrl(this, etBackendUrl.text?.toString().orEmpty())
+        if (newUrl == null) {
+            tvBackendConnectionResult.setTextColor(ContextCompat.getColor(this, R.color.danger))
+            tvBackendConnectionResult.text = "Enter a valid URL: emulator http://10.0.2.2:8000, phone PC LAN URL, or production HTTPS URL."
+            return
+        }
+        val changed = previousUrl != newUrl
+        val reconnectMonitor = changed && isMonitoringActive
+        val deviceId = etDeviceId.text?.toString()?.trim().orEmpty()
+        if (reconnectMonitor) stopMonitoring()
+        btnSaveBackendUrl.isEnabled = false
+        btnTestBackendUrl.isEnabled = false
+        tvBackendConnectionResult.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+        tvBackendConnectionResult.text = if (testConnection) "Checking backend health and session…" else "Saving backend address…"
+        lifecycleScope.launch {
+            try {
+                val backendName = if (testConnection) authApi.testConnection(session.accessToken) else null
+                if (reconnectMonitor) {
+                    if (deviceId.length < 4) throw IllegalArgumentException("Device ID must contain at least four characters before monitoring can reconnect.")
+                    authApi.registerDevice(session.accessToken, deviceId, "FallGuard Android phone")
+                    startMonitoringService(deviceId)
+                }
+                tvBackendConnectionResult.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.success))
+                tvBackendConnectionResult.text = when {
+                    backendName != null -> "Connected to $backendName; session verified at $newUrl."
+                    reconnectMonitor -> "Saved $newUrl and reconnected monitoring securely."
+                    else -> "Saved backend URL: $newUrl"
+                }
+            } catch (error: ApiException) {
+                tvBackendConnectionResult.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.danger))
+                tvBackendConnectionResult.text = "Backend returned HTTP ${error.statusCode}: ${error.message}"
+                if (error.statusCode == 401) expireSession("Your session is invalid or expired. Please sign in again.")
+            } catch (error: Exception) {
+                tvBackendConnectionResult.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.danger))
+                tvBackendConnectionResult.text = error.message ?: "Could not save or test the backend address."
+            } finally {
+                btnSaveBackendUrl.isEnabled = true
+                btnTestBackendUrl.isEnabled = true
+            }
+        }
     }
 
     private fun loadDashboardOnce() {
@@ -133,11 +243,13 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val profile = authApi.currentUser(session.accessToken)
+                signedInProfile = profile
                 tvSignedInUser.text = "Signed in — ${profile.name}"
                 val dashboard = authApi.dashboard(session.accessToken)
                 tvSignedInUser.text = "Signed in — ${dashboard.name}"
                 getSharedPreferences("fallguard_user", MODE_PRIVATE).edit().putString("name", dashboard.name).apply()
-                tvDashboardSummary.text = "Activity: ${dashboard.activity}\nRisk: ${dashboard.risk}  •  Status: ${dashboard.status}\nFalls recorded: ${dashboard.falls}  •  Activities: ${dashboard.activities}"
+                val safetyDetails = authApi.safetyDetails(session.accessToken)
+                tvDashboardSummary.text = "Activity: ${dashboard.activity}\nRisk: ${dashboard.risk}  •  Status: ${dashboard.status}\nFalls recorded: ${dashboard.falls}  •  Activities: ${dashboard.activities}\n\n$safetyDetails"
             } catch (e: ApiException) {
                 if (e.statusCode == 401) expireSession("Your session is invalid or expired. Please sign in again.")
                 else tvDashboardSummary.text = "Dashboard unavailable (HTTP ${e.statusCode}): ${e.message}"
@@ -145,6 +257,61 @@ class MainActivity : AppCompatActivity() {
                 tvDashboardSummary.text = "Dashboard unavailable: ${e.message ?: "Check your backend URL and connection."}"
             }
         }
+    }
+
+    private fun showEmergencyContactEditor() {
+        val profile = signedInProfile ?: run {
+            tvDashboardSummary.text = "Load your authenticated profile before editing emergency contacts."
+            return
+        }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        fun input(hintText: String, value: String?, type: Int): EditText = EditText(this).also { edit ->
+            edit.hint = hintText
+            edit.setText(value.orEmpty())
+            edit.inputType = type
+            fields.addView(edit)
+        }
+        val name = input("Emergency contact name", profile.emergency_contact_name, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
+        val phone = input("Phone with country code (for example +15551234567)", profile.emergency_contact_phone, InputType.TYPE_CLASS_PHONE)
+        val email = input("Emergency contact email", profile.emergency_contact_email, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Emergency contact")
+            .setView(fields)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val contactName = name.text.toString().trim()
+                val contactPhone = phone.text.toString().trim()
+                if (contactName.isBlank() || !contactPhone.matches(Regex("^\\+[1-9]\\d{7,14}$"))) {
+                    tvDashboardSummary.text = "Enter an emergency contact name and an international phone number."
+                    return@setOnClickListener
+                }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                lifecycleScope.launch {
+                    try {
+                        authApi.updateEmergencyContact(session.accessToken, contactName, contactPhone, email.text.toString())
+                        signedInProfile = authApi.currentUser(session.accessToken)
+                        tvDashboardSummary.text = "Emergency contact saved. Refreshing your private dashboard…"
+                        loadDashboardOnce()
+                        dialog.dismiss()
+                    } catch (e: ApiException) {
+                        if (e.statusCode == 401) expireSession("Your session is invalid or expired. Please sign in again.")
+                        else tvDashboardSummary.text = "Could not update emergency contact (HTTP ${e.statusCode}): ${e.message}"
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                    } catch (e: Exception) {
+                        tvDashboardSummary.text = "Could not update emergency contact: ${e.message ?: "Check your backend connection."}"
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                    }
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun startMonitoring() {
@@ -175,18 +342,7 @@ class MainActivity : AppCompatActivity() {
                 // Register ownership with the authenticated API before opening the sensor socket.
                 authApi.registerDevice(session.accessToken, deviceId, "FallGuard Android phone")
                 getSharedPreferences("fallguard_settings", MODE_PRIVATE).edit().putString("sensor_device_id", deviceId).apply()
-                val serviceIntent = Intent(this@MainActivity, SensorForegroundService::class.java).apply {
-                    putExtra("SERVER_URL", BackendConfig.sensorWebSocketUrl(this@MainActivity))
-                    putExtra("DEVICE_ID", deviceId)
-                    putExtra("JWT_TOKEN", session.accessToken)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent) else startService(serviceIntent)
-                if (!bound) {
-                    bound = bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE)
-                }
-                isMonitoringActive = true
-                btnToggleMonitoring.text = getString(R.string.btn_stop)
-                btnToggleMonitoring.setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.danger))
+                startMonitoringService(deviceId)
                 tvDashboardSummary.text = "Device registered. Connecting securely to sensor monitoring…"
                 promptBackgroundOperationSettings()
             } catch (e: ApiException) {
@@ -199,6 +355,19 @@ class MainActivity : AppCompatActivity() {
                 if (!isMonitoringActive) btnToggleMonitoring.text = getString(R.string.btn_start)
             }
         }
+    }
+
+    private fun startMonitoringService(deviceId: String) {
+        val serviceIntent = Intent(this, SensorForegroundService::class.java).apply {
+            putExtra("SERVER_URL", BackendConfig.sensorWebSocketUrl(this@MainActivity))
+            putExtra("DEVICE_ID", deviceId)
+            putExtra("JWT_TOKEN", session.accessToken)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent) else startService(serviceIntent)
+        if (!bound) bound = bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE)
+        isMonitoringActive = true
+        btnToggleMonitoring.text = getString(R.string.btn_stop)
+        btnToggleMonitoring.setBackgroundColor(ContextCompat.getColor(this, R.color.danger))
     }
 
     private fun stopMonitoring() {

@@ -9,4 +9,10 @@
     <string name="need_help">NEED HELP</string>
     <string name="possible_fall_title">Possible Fall Detected!</string>
     <string name="possible_fall_subtitle">Are you okay? We will contact emergency services if you don\'t respond.</string>
+    <string name="fall_alert_sending">Sending your response securely…</string>
+    <string name="fall_alert_waiting_backend">Time elapsed. Waiting for the backend to process the configured emergency workflow…</string>
+    <string name="fall_alert_network_error">Could not reach the backend. Your response was not confirmed. Check the connection and try again.</string>
+    <string name="fall_alert_cancelled">Your response was recorded. Emergency escalation was cancelled.</string>
+    <string name="fall_alert_no_contacts">The fall was recorded, but no configured emergency contacts were dispatched.</string>
+    <string name="fall_alert_expiry_unconfirmed">The timer ended, but the server result could not be confirmed. Reconnect to the network; do not assume an emergency contact was notified.</string>
 </resources>

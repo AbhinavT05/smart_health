@@ -5,6 +5,7 @@ import android.os.Looper
 import android.util.Log
 import com.fallguard.ai.model.Axis3D
 import com.fallguard.ai.model.FallConfirmationResponse
+import com.fallguard.ai.model.FallResolution
 import com.fallguard.ai.model.IncomingPendingFallMessage
 import com.fallguard.ai.model.RawSensorReading
 import com.fallguard.ai.model.SensorDataPacket
@@ -42,24 +43,49 @@ class SensorWebSocketClient(
     private var shouldReconnect = true
     private var reconnectDelayMs = 1000L
     private val MAX_RECONNECT_DELAY_MS = 16000L
+    private val MAX_RECONNECT_ATTEMPTS = 8
+    private var reconnectAttempts = 0
     @Volatile private var generation = 0
     @Volatile private var authenticationRejected = false
     private var reconnectRunnable: Runnable? = null
+    private val seenFallIds = linkedSetOf<Int>()
 
     var onConnectionStateChanged: ((Boolean) -> Unit)? = null
     var onPendingFallReceived: ((IncomingPendingFallMessage) -> Unit)? = null
-    var onFallResolved: ((Int) -> Unit)? = null
+    var onFallResolved: ((FallResolution) -> Unit)? = null
     var onAuthenticationRejected: ((String) -> Unit)? = null
 
     fun updateConfig(url: String, token: String, devId: String) {
+        val changed = serverUrl != url || jwtToken != token || deviceId != devId
         serverUrl = url
         jwtToken = token
         deviceId = devId
+        if (changed) {
+            authenticationRejected = false
+            connect()
+        } else if (!isConnected && !authenticationRejected) {
+            reconnectForNetworkChange()
+        }
     }
 
     fun connect() {
         shouldReconnect = true
         authenticationRejected = false
+        reconnectAttempts = 0
+        reconnectDelayMs = 1000L
+        openSocket()
+    }
+
+    fun reconnectForNetworkChange() {
+        if (authenticationRejected) return
+        shouldReconnect = true
+        reconnectAttempts = 0
+        reconnectDelayMs = 1000L
+        openSocket()
+    }
+
+    private fun openSocket() {
+        if (!shouldReconnect || authenticationRejected) return
         mainHandler.removeCallbacksAndMessages(null)
         val currentGeneration = ++generation
         webSocket?.cancel()
@@ -86,13 +112,28 @@ class SensorWebSocketClient(
                         "auth_success" -> {
                             if (currentGeneration != generation) return
                             isConnected = true
+                            reconnectAttempts = 0
                             reconnectDelayMs = 1000L
                             mainHandler.post { onConnectionStateChanged?.invoke(true) }
                             return
                         }
                         "FALL_CONFIRMATION_RESOLVED" -> {
-                            val eventId = json.getAsJsonObject("data")?.get("event_id")?.asInt
-                            if (eventId != null) mainHandler.post { onFallResolved?.invoke(eventId) }
+                            val data = json.getAsJsonObject("data")
+                            val eventId = data?.get("event_id")?.takeUnless { it.isJsonNull }?.asInt
+                            if (eventId != null) {
+                                val result = FallResolution(
+                                    eventId = eventId,
+                                    status = data.get("status")?.takeUnless { it.isJsonNull }?.asString.orEmpty(),
+                                    alertDispatchRequested = data.get("alert_dispatch_requested")
+                                        ?.takeUnless { it.isJsonNull }?.asBoolean,
+                                    simulated = data.get("simulated")?.takeUnless { it.isJsonNull }?.asBoolean ?: false,
+                                    deliveryStatuses = data.getAsJsonArray("delivery_statuses")?.map {
+                                        val item = it.asJsonObject
+                                        "${item.get("channel")?.asString ?: "contact"}: ${item.get("status")?.asString ?: "unknown"}"
+                                    } ?: emptyList(),
+                                )
+                                mainHandler.post { onFallResolved?.invoke(result) }
+                            }
                             return
                         }
                         "error" -> {
@@ -112,6 +153,15 @@ class SensorWebSocketClient(
                     }
                     val msg = gson.fromJson(text, IncomingPendingFallMessage::class.java)
                     if (msg.type == "FALL_PENDING_CONFIRMATION" && msg.event != null) {
+                        val eventId = msg.event.eventId.takeIf { it > 0 } ?: msg.event.id
+                        val isNew = synchronized(seenFallIds) {
+                            if (eventId in seenFallIds) false else {
+                                seenFallIds.add(eventId)
+                                if (seenFallIds.size > 256) seenFallIds.remove(seenFallIds.first())
+                                true
+                            }
+                        }
+                        if (!isNew) return
                         Log.w(TAG, "Received potential fall alert from backend! Event ID: ${msg.event.id}")
                         mainHandler.post { onPendingFallReceived?.invoke(msg) }
                     }
@@ -160,12 +210,18 @@ class SensorWebSocketClient(
 
     private fun scheduleReconnect(expectedGeneration: Int) {
         if (!shouldReconnect || authenticationRejected) return
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            shouldReconnect = false
+            Log.w(TAG, "WebSocket retry limit reached; waiting for a network change or user restart")
+            return
+        }
         reconnectRunnable?.let(mainHandler::removeCallbacks)
         reconnectRunnable = Runnable {
             if (shouldReconnect && !isConnected && !authenticationRejected && expectedGeneration == generation) {
-                Log.i(TAG, "Attempting automatic reconnection (delay ${reconnectDelayMs}ms)...")
+                reconnectAttempts++
+                Log.i(TAG, "WebSocket reconnect attempt $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS (delay ${reconnectDelayMs}ms)")
                 reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
-                connect()
+                openSocket()
             }
         }
         mainHandler.postDelayed(reconnectRunnable!!, reconnectDelayMs)
@@ -186,13 +242,14 @@ class SensorWebSocketClient(
     }
 
     fun sendFallConfirmation(eventId: Int, action: String, location: Map<String, Double>? = null): Boolean {
+        if (!isConnected || authenticationRejected || eventId <= 0) return false
         val payload = FallConfirmationResponse(
             eventId = eventId,
             action = action,
             location = location
         )
         val json = gson.toJson(payload)
-        Log.i(TAG, "Sending fall confirmation response: $json")
+        Log.i(TAG, "Queueing fall confirmation response for event $eventId")
         return webSocket?.send(json) ?: false
     }
 }

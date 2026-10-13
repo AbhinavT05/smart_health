@@ -30,3 +30,11 @@ data class IncomingPendingFallMessage(
     @SerializedName("type") val type: String,
     @SerializedName("event") val event: IncomingFallEvent?
 )
+
+data class FallResolution(
+    val eventId: Int,
+    val status: String,
+    val alertDispatchRequested: Boolean? = null,
+    val simulated: Boolean = false,
+    val deliveryStatuses: List<String> = emptyList(),
+)

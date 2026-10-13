@@ -7,6 +7,7 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import sklearn
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -50,7 +51,9 @@ def main() -> None:
     ).fit(scaler.transform(x), y)
     classes = ["NON_FALL", "FALL"]
     bundle = {
+        "bundle_format_version": 1,
         "architecture": "hybrid_rf_svm",
+        "scikit_learn_version": sklearn.__version__,
         "rf_model": rf,
         "svm_model": svm,
         "scaler": scaler,

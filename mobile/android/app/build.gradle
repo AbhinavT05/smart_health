@@ -25,7 +25,6 @@ android {
         debug {
             def backendBaseUrl = project.findProperty("backendBaseUrl") ?: "http://10.0.2.2:8000"
             buildConfigField "String", "DEFAULT_BACKEND_BASE_URL", "\"${backendBaseUrl}\""
-            buildConfigField "String", "REAL_DEVICE_DEFAULT_BACKEND_BASE_URL", "\"http://10.18.111.30:8000\""
         }
         release {
             def backendBaseUrl = project.findProperty("backendBaseUrl")?.toString()?.trim() ?: ""
@@ -33,7 +32,6 @@ android {
                 throw new GradleException("Release builds require backendBaseUrl=https://<your-deployed-backend>.")
             }
             buildConfigField "String", "DEFAULT_BACKEND_BASE_URL", "\"${backendBaseUrl}\""
-            buildConfigField "String", "REAL_DEVICE_DEFAULT_BACKEND_BASE_URL", "\"\""
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

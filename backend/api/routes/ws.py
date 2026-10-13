@@ -251,7 +251,8 @@ async def websocket_smartphone_sensor_endpoint(
                         db=db,
                         fall_event_id=int(event_id),
                         action=str(action),
-                        location=location
+                        location=location,
+                        acting_user_id=user.id,
                     )
                 continue
 

@@ -11,9 +11,18 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.net.ConnectException
+import java.net.UnknownHostException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import javax.net.ssl.SSLException
 import java.util.concurrent.TimeUnit
 
-data class ApiUser(val id: Int = 0, val name: String = "", val email: String = "", val role: String = "PATIENT")
+data class ApiUser(
+    val id: Int = 0, val name: String = "", val email: String = "", val role: String = "PATIENT",
+    val phone_number: String? = null, val emergency_contact_name: String? = null,
+    val emergency_contact_phone: String? = null, val emergency_contact_email: String? = null
+)
 data class AuthResponse(
     val access_token: String = "",
     val token_type: String = "bearer",
@@ -41,8 +50,8 @@ class AuthApi(private val context: Context) {
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     suspend fun login(email: String, password: String): AuthResponse = withContext(Dispatchers.IO) {
-        val payload = "{\"email\":${gson.toJson(email.trim())},\"password\":${gson.toJson(password)}}"
-        execute("/api/auth/login", payload = payload).let(::parseAuth)
+        val payload = gson.toJson(mapOf("email" to email.trim(), "password" to password))
+        execute("/api/auth/login", method = "POST", payload = payload).let(::parseAuth)
     }
 
     suspend fun register(
@@ -54,13 +63,30 @@ class AuthApi(private val context: Context) {
         emergencyPhone: String,
         emergencyEmail: String
     ): AuthResponse = withContext(Dispatchers.IO) {
-        val payload = """{"name":${gson.toJson(name.trim())},"email":${gson.toJson(email.trim())},"password":${gson.toJson(password)},"confirm_password":${gson.toJson(password)},"phone_number":${gson.toJson(phone.trim())},"emergency_contact_name":${gson.toJson(emergencyName.trim())},"emergency_contact_phone":${gson.toJson(emergencyPhone.trim())},"emergency_contact_email":${gson.toJson(emergencyEmail.trim())}}"""
-        execute("/api/auth/register", payload = payload).let(::parseAuth)
+        val payload = gson.toJson(mapOf(
+            "name" to name.trim(),
+            "email" to email.trim(),
+            "password" to password,
+            "confirm_password" to password,
+            "phone_number" to phone.trim(),
+            "emergency_contact_name" to emergencyName.trim(),
+            "emergency_contact_phone" to emergencyPhone.trim(),
+            "emergency_contact_email" to emergencyEmail.trim()
+        ))
+        execute("/api/auth/register", method = "POST", payload = payload).let(::parseAuth)
     }
 
     suspend fun currentUser(token: String): ApiUser = withContext(Dispatchers.IO) {
         val text = execute("/api/auth/me", token = token)
         gson.fromJson(text, ApiUser::class.java) ?: throw IOException("The backend returned an empty user profile.")
+    }
+
+    suspend fun testConnection(token: String? = null): String = withContext(Dispatchers.IO) {
+        val response = JsonParser.parseString(execute("/api/health", token = token)).asJsonObject
+        val status = response.get("status")?.takeUnless { it.isJsonNull }?.asString
+        if (status != "healthy") throw IOException("The backend responded, but its health status was '$status'.")
+        if (!token.isNullOrBlank()) currentUser(token)
+        response.get("app")?.takeUnless { it.isJsonNull }?.asString ?: "FallGuard backend"
     }
 
     suspend fun dashboard(token: String): DashboardInfo = withContext(Dispatchers.IO) {
@@ -75,6 +101,26 @@ class AuthApi(private val context: Context) {
             falls = root.intValue("total_falls_count"),
             activities = root.intValue("total_activities_count")
         )
+    }
+
+    suspend fun safetyDetails(token: String): String = withContext(Dispatchers.IO) {
+        val contactArray = JsonParser.parseString(execute("/api/contacts", token = token)).asJsonArray
+        val fallArray = JsonParser.parseString(execute("/api/falls?limit=5", token = token)).asJsonArray
+        val contacts = contactArray.map { element ->
+            val contact = element.asJsonObject
+            "• ${contact.stringValue("name", "Emergency contact")} — ${contact.stringValue("phone_number", "No phone")}"
+        }
+        val falls = fallArray.map { element ->
+            val fall = element.asJsonObject
+            "• ${fall.stringValue("event_kind", "Fall event")} · ${fall.stringValue("status", "Unknown status")} · ${fall.stringValue("timestamp", "Time unavailable").replace('T', ' ')}"
+        }
+        "Emergency contacts\n${contacts.takeIf { it.isNotEmpty() }?.joinToString("\n") ?: "No emergency contacts configured."}\n\nRecent fall events\n${falls.takeIf { it.isNotEmpty() }?.joinToString("\n") ?: "No fall events recorded."}"
+    }
+
+    suspend fun updateEmergencyContact(token: String, name: String, phone: String, email: String) = withContext(Dispatchers.IO) {
+        val payload = """{"emergency_contact_name":${gson.toJson(name.trim())},"emergency_contact_phone":${gson.toJson(phone.trim())},"emergency_contact_email":${gson.toJson(email.trim())}}"""
+        execute("/api/auth/emergency-contact", method = "PUT", payload = payload, token = token)
+        Unit
     }
 
     suspend fun registerDevice(token: String, deviceId: String, displayName: String) = withContext(Dispatchers.IO) {
@@ -102,7 +148,10 @@ class AuthApi(private val context: Context) {
         val body = payload?.toRequestBody(jsonType)
         val request = when (method) {
             "POST" -> builder.post(body ?: ByteArray(0).toRequestBody(null)).build()
-            else -> builder.get().build()
+            "PUT" -> builder.put(body ?: ByteArray(0).toRequestBody(null)).build()
+            "DELETE" -> builder.delete(body).build()
+            "GET" -> builder.get().build()
+            else -> throw IllegalArgumentException("Unsupported API method: $method")
         }
         try {
             client.newCall(request).execute().use { response ->
@@ -115,8 +164,23 @@ class AuthApi(private val context: Context) {
         } catch (error: ApiException) {
             throw error
         } catch (error: IOException) {
-            throw IOException("Could not reach ${BackendConfig.getBaseUrl(context)}. ${error.message ?: "Check the backend URL and network."}", error)
+            throw IOException(networkErrorMessage(error), error)
         }
+    }
+
+    private fun networkErrorMessage(error: IOException): String {
+        var cause: Throwable? = error
+        while (cause != null) {
+            when (cause) {
+                is UnknownHostException -> return "Could not resolve the backend host in ${BackendConfig.getBaseUrl(context)}. Check the URL, DNS, and network."
+                is SocketTimeoutException -> return "The backend at ${BackendConfig.getBaseUrl(context)} timed out. Check that it is running and reachable."
+                is ConnectException -> return "The backend refused the connection at ${BackendConfig.getBaseUrl(context)}. Check its host, port, and firewall."
+                is SSLException -> return "Secure connection to ${BackendConfig.getBaseUrl(context)} failed. Check the HTTPS certificate and URL."
+                is SocketException -> return "The network connection to ${BackendConfig.getBaseUrl(context)} was lost. Reconnect to the network and retry."
+            }
+            cause = cause.cause
+        }
+        return "Could not reach ${BackendConfig.getBaseUrl(context)}. ${error.message ?: "Check the backend URL and network."}"
     }
 
     private fun errorMessage(body: String, status: Int): String {

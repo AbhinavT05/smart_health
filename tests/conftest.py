@@ -6,11 +6,14 @@ preserving the existing fall_guard.db database untouched.
 
 import os
 import sys
+import shutil
+import tempfile
 from pathlib import Path
 import pytest
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-TEST_DB_PATH = BASE_DIR / "test_fall_guard.db"
+TEST_DB_DIR = Path(tempfile.mkdtemp(prefix="fallguard-tests-", dir=BASE_DIR / "tests"))
+TEST_DB_PATH = TEST_DB_DIR / "test_fall_guard.db"
 
 # Set DATABASE_URL to isolated test database before importing backend modules
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH.as_posix()}"
@@ -21,11 +24,14 @@ from backend.database.session import engine
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
     """Initialize clean isolated test database before test session and clean up after."""
-    init_db()
+    try:
+        init_db()
+    except Exception:
+        engine.dispose()
+        shutil.rmtree(TEST_DB_DIR, ignore_errors=True)
+        raise
     yield
     engine.dispose()
-    if TEST_DB_PATH.exists():
-        try:
-            TEST_DB_PATH.unlink()
-        except Exception:
-            pass
+    # This fixture only removes its own unique temporary directory. Existing
+    # project databases, including a developer's test_fall_guard.db, are kept.
+    shutil.rmtree(TEST_DB_DIR, ignore_errors=True)
