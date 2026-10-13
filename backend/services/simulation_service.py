@@ -23,14 +23,16 @@ class SimulationService:
         self.is_running: bool = False
         self.is_paused: bool = False
         self.playback_speed: float = 1.0
-        self.scenario: str = "mixed_activities_with_fall"
+        self.scenario: str = "dataset_replay"
         self.samples_replayed: int = 0
         self.total_samples: int = 2000
         self.current_activity: str = "IDLE"
         self.current_risk: str = "LOW"
         self._task: Optional[asyncio.Task] = None
         self._sliding_buffer = deque(maxlen=128)
-        self._manual_fall_injected: bool = False
+        self.subject: Optional[str] = None
+        self.activity_code: Optional[str] = None
+        self.trial: Optional[str] = None
         self.user_id: Optional[int] = None
 
     def get_status(self) -> Dict[str, Any]:
@@ -45,7 +47,7 @@ class SimulationService:
             "current_risk": self.current_risk
         }
 
-    async def start(self, scenario: str = "mixed_activities_with_fall", playback_speed: float = 1.0, user_id: Optional[int] = None):
+    async def start(self, scenario: str = "dataset_replay", playback_speed: float = 1.0, user_id: Optional[int] = None, subject: Optional[str] = None, activity_code: Optional[str] = None, trial: Optional[str] = None):
         if self._task and not self._task.done():
             self.stop()
             try:
@@ -54,6 +56,7 @@ class SimulationService:
                 pass
             
         self.scenario = scenario
+        self.subject, self.activity_code, self.trial = subject, activity_code, trial
         self.user_id = user_id
         self.playback_speed = max(0.2, min(playback_speed, 10.0))
         self.is_running = True
@@ -79,13 +82,8 @@ class SimulationService:
         self.is_paused = False
         logger.info("Resumed simulation.")
 
-    def trigger_manual_fall(self):
-        """Inject a high-impact fall signature on demand."""
-        self._manual_fall_injected = True
-        logger.info("Manual high-impact fall signature injected into stream.")
-
     async def _simulation_loop(self, user_id: Optional[int]):
-        gen = generate_sensor_stream_generator(scenario=self.scenario)
+        gen = generate_sensor_stream_generator(scenario=self.scenario, subject=self.subject, activity_code=self.activity_code, trial=self.trial)
         db = SessionLocal()
         
         # Base tick interval at 50Hz = 0.02s
@@ -102,18 +100,6 @@ class SimulationService:
                 self.samples_replayed += 1
                 step_counter += 1
                 
-                # Check manual fall override
-                if self._manual_fall_injected:
-                    reading["acc_x"] = 3.8
-                    reading["acc_y"] = 2.9
-                    reading["acc_z"] = -4.2
-                    reading["gyro_x"] = 4.5
-                    reading["gyro_y"] = 3.9
-                    reading["gyro_z"] = 2.8
-                    reading["ground_truth"] = "FALL"
-                    reading["is_fall"] = 1
-                    self._manual_fall_injected = False
-                    
                 ax = reading["acc_x"]
                 ay = reading["acc_y"]
                 az = reading["acc_z"]
@@ -130,6 +116,7 @@ class SimulationService:
                 if step_counter % 2 == 0:
                     ws_point = {
                         "type": "SENSOR_TICK",
+                        "simulated": True,
                         "data": {
                             "timestamp": datetime.utcnow().strftime("%H:%M:%S.%f")[:-3],
                             "acc_x": ax,
@@ -164,6 +151,7 @@ class SimulationService:
                         gyro_z=arr_padded[:, 5].tolist(),
                         user_id=user_id,
                     )
+                    pred["simulated"] = True
                     self.current_activity = pred["activity"]
                     self.current_risk = pred["risk_level"]
                     

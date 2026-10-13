@@ -304,7 +304,7 @@ async def websocket_smartphone_sensor_endpoint(
                     })
 
                 # Check sliding window stride: run inference if stride reached & buffer >= 64 samples
-                if buffer.should_run_inference(stride=settings.INFERENCE_STRIDE_SAMPLES, min_samples=64):
+                if buffer.should_run_inference(stride=settings.INFERENCE_STRIDE_SAMPLES, min_samples=settings.WINDOW_SAMPLES):
                     window_arr = buffer.extract_inference_window(target_samples=settings.WINDOW_SAMPLES)
                     logger.info(f"inference executed for device='{dev_id}' (window shape: {window_arr.shape})")
                     

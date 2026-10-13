@@ -61,7 +61,7 @@ def test_hybrid_fusion_calculation():
     assert res_fall["hybrid_fall_probability"] == 0.86
 
 
-def test_hybrid_inference_with_mock_bundle(tmp_path):
+def test_synthetic_hybrid_inference_with_mock_bundle(tmp_path):
     """Verify FallDetector executes hybrid RF + SVM inference correctly when bundle is present."""
     import joblib
     from sklearn.ensemble import RandomForestClassifier

@@ -30,6 +30,7 @@ import com.google.android.material.button.MaterialButton
 class FallConfirmationActivity : AppCompatActivity() {
 
     private var eventId: Int = 0
+    private var responseSubmitted = false
     private var timeoutSeconds: Float = 15f
     private var countDownTimer: CountDownTimer? = null
     private var service: SensorForegroundService? = null
@@ -107,9 +108,12 @@ class FallConfirmationActivity : AppCompatActivity() {
     }
 
     private fun handleConfirmationAction(action: String) {
+        if (responseSubmitted) return
+        responseSubmitted = true
         countDownTimer?.cancel()
         locationHelper.getEmergencyLocation { loc ->
             service?.submitFallConfirmation(eventId, action, loc)
+            service?.dismissFallNotification(eventId)
             finish()
         }
     }

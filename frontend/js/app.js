@@ -155,13 +155,11 @@ class FallGuardApp {
     // Quick Simulation buttons
     document.getElementById("btn-quick-sim-start")?.addEventListener("click", () => this.controlSim("start"));
     document.getElementById("btn-quick-sim-pause")?.addEventListener("click", () => this.controlSim("pause"));
-    document.getElementById("btn-quick-sim-fall")?.addEventListener("click", () => this.controlSim("trigger_fall"));
 
     // Full Simulation Panel buttons
     document.getElementById("btn-sim-start")?.addEventListener("click", () => this.controlSim("start"));
     document.getElementById("btn-sim-pause")?.addEventListener("click", () => this.controlSim("pause"));
     document.getElementById("btn-sim-stop")?.addEventListener("click", () => this.controlSim("stop"));
-    document.getElementById("btn-sim-manual-fall")?.addEventListener("click", () => this.controlSim("trigger_fall"));
 
     // Speed buttons
     document.querySelectorAll(".btn-speed").forEach(btn => {
@@ -711,7 +709,7 @@ class FallGuardApp {
   // --- Simulation Control ---
   async controlSim(action) {
     try {
-      const scenario = document.getElementById("sim-scenario-select")?.value || "mixed_activities_with_fall";
+      const scenario = document.getElementById("sim-scenario-select")?.value || "dataset_replay";
       const res = await this.authFetch("/api/simulation/control", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -725,7 +723,7 @@ class FallGuardApp {
         const status = await res.json();
         const badge = document.getElementById("sim-badge-status");
         if (badge) {
-          badge.textContent = status.is_running ? `Streaming (${status.playback_speed}x)` : "Simulator Idle";
+          badge.textContent = status.is_running ? `Replay (${status.playback_speed}x)` : "Replay Idle";
           badge.className = status.is_running ? "badge-status-running active" : "badge-status-running";
         }
       }

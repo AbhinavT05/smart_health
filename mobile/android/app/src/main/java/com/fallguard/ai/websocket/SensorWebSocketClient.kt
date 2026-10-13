@@ -48,6 +48,7 @@ class SensorWebSocketClient(
 
     var onConnectionStateChanged: ((Boolean) -> Unit)? = null
     var onPendingFallReceived: ((IncomingPendingFallMessage) -> Unit)? = null
+    var onFallResolved: ((Int) -> Unit)? = null
     var onAuthenticationRejected: ((String) -> Unit)? = null
 
     fun updateConfig(url: String, token: String, devId: String) {
@@ -87,6 +88,11 @@ class SensorWebSocketClient(
                             isConnected = true
                             reconnectDelayMs = 1000L
                             mainHandler.post { onConnectionStateChanged?.invoke(true) }
+                            return
+                        }
+                        "FALL_CONFIRMATION_RESOLVED" -> {
+                            val eventId = json.getAsJsonObject("data")?.get("event_id")?.asInt
+                            if (eventId != null) mainHandler.post { onFallResolved?.invoke(eventId) }
                             return
                         }
                         "error" -> {

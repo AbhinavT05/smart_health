@@ -1,6 +1,7 @@
 package com.fallguard.ai.auth
 
 import android.content.Context
+import android.os.Build
 import com.fallguard.ai.BuildConfig
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -9,8 +10,20 @@ object BackendConfig {
     private const val PREFS = "fallguard_settings"
     private const val BASE_URL = "backend_base_url"
 
+    private fun isEmulator(): Boolean =
+        Build.FINGERPRINT.startsWith("generic") || Build.FINGERPRINT.lowercase().contains("emulator") ||
+            Build.MODEL.contains("Emulator", ignoreCase = true) || Build.HARDWARE.contains("goldfish") ||
+            Build.HARDWARE.contains("ranchu") || Build.PRODUCT.contains("sdk", ignoreCase = true)
+
+    fun defaultBaseUrl(): String = when {
+        !BuildConfig.DEBUG -> BuildConfig.DEFAULT_BACKEND_BASE_URL
+        isEmulator() -> BuildConfig.DEFAULT_BACKEND_BASE_URL
+        BuildConfig.REAL_DEVICE_DEFAULT_BACKEND_BASE_URL.isNotBlank() -> BuildConfig.REAL_DEVICE_DEFAULT_BACKEND_BASE_URL
+        else -> BuildConfig.DEFAULT_BACKEND_BASE_URL
+    }
+
     fun getBaseUrl(context: Context): String = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        .getString(BASE_URL, BuildConfig.DEFAULT_BACKEND_BASE_URL) ?: BuildConfig.DEFAULT_BACKEND_BASE_URL
+        .getString(BASE_URL, null) ?: defaultBaseUrl()
 
     fun validateBaseUrl(raw: String): String? {
         val candidate = raw.trim().trimEnd('/')

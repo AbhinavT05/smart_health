@@ -49,6 +49,9 @@ Thumbs.db
 # Android / Gradle
 .gradle/
 **/build/
+**/local.properties
+**/*.jks
+**/*.keystore
 
 # Testing & Coverage
 .pytest_cache/

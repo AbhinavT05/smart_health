@@ -18,11 +18,10 @@ def split_by_subject(
     """
     Perform subject-independent split.
     Guarantees every activity class (including FALL) is present in both train and test sets,
-    while maintaining 100% strict subject isolation (zero data leakage).
+    while maintaining strict subject isolation (zero data leakage).
     """
     np.random.seed(random_seed)
     
-    # 1. Check if we have ADL cohort (UCI HAR) and Fall cohort
     is_fall_mask = df_features["is_fall"] == 1
     
     adl_subjects = sorted(df_features[~is_fall_mask]["subject_id"].unique())
@@ -31,19 +30,11 @@ def split_by_subject(
     train_subs = set()
     test_subs = set()
     
-    # Check if UCI HAR split origin is present
-    if "split_origin" in df_features.columns and "train" in df_features["split_origin"].values:
-        # Use official UCI HAR subject partitions
-        uci_train_subs = df_features[df_features["split_origin"] == "train"]["subject_id"].unique()
-        uci_test_subs = df_features[df_features["split_origin"] == "test"]["subject_id"].unique()
-        train_subs.update(uci_train_subs)
-        test_subs.update(uci_test_subs)
-    else:
-        # Partition ADL subjects
-        shuffled_adls = np.random.permutation(adl_subjects)
-        n_adl_test = max(1, int(len(adl_subjects) * test_subject_ratio))
-        test_subs.update(shuffled_adls[:n_adl_test])
-        train_subs.update(shuffled_adls[n_adl_test:])
+    # Partition ADL subjects
+    shuffled_adls = np.random.permutation(adl_subjects)
+    n_adl_test = max(1, int(len(adl_subjects) * test_subject_ratio))
+    test_subs.update(shuffled_adls[:n_adl_test])
+    train_subs.update(shuffled_adls[n_adl_test:])
         
     # Partition Fall cohort subjects independently (e.g. 70% train subjects, 30% test subjects)
     if len(fall_subjects) > 0:

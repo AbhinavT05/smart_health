@@ -153,6 +153,8 @@ def extract_features_from_window(
     features["svmag_mean"] = float(np.mean(acc_mag))
     features["svmag_std"] = float(np.std(acc_mag, ddof=1)) if n > 1 else 0.0
     features["svmag_max"] = float(np.max(acc_mag)) if n > 0 else 0.0
+    features["svmag_var"] = float(np.var(acc_mag, ddof=1)) if n > 1 else 0.0
+    features["svmag_p2p"] = float(np.ptp(acc_mag)) if n > 0 else 0.0
     
     # Dynamic Features: Jerk (rate of change of acceleration)
     dt = 1.0 / sampling_rate

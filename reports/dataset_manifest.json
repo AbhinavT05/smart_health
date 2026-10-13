@@ -1,0 +1,175 @@
+{
+  "dataset": "MobiFall",
+  "sample_rate_hz": 50.0,
+  "window_samples": 128,
+  "window_seconds": 2.56,
+  "stride_samples": 64,
+  "window_cap_per_trial": 6,
+  "classes": {
+    "non_fall": {
+      "subjects": 9,
+      "subject_ids": [
+        "MOB_02",
+        "MOB_03",
+        "MOB_04",
+        "MOB_05",
+        "MOB_07",
+        "MOB_08",
+        "MOB_09",
+        "MOB_10",
+        "MOB_11"
+      ],
+      "trials": 342,
+      "windows": 1561
+    },
+    "fall": {
+      "subjects": 24,
+      "subject_ids": [
+        "MOB_01",
+        "MOB_02",
+        "MOB_03",
+        "MOB_04",
+        "MOB_05",
+        "MOB_06",
+        "MOB_07",
+        "MOB_08",
+        "MOB_09",
+        "MOB_10",
+        "MOB_11",
+        "MOB_12",
+        "MOB_13",
+        "MOB_14",
+        "MOB_15",
+        "MOB_16",
+        "MOB_17",
+        "MOB_18",
+        "MOB_19",
+        "MOB_20",
+        "MOB_21",
+        "MOB_29",
+        "MOB_30",
+        "MOB_31"
+      ],
+      "trials": 288,
+      "windows": 469
+    }
+  },
+  "activity_codes": {
+    "BSC": {
+      "class": "fall",
+      "subjects": 24,
+      "trials": 72,
+      "windows": 120
+    },
+    "CSI": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 54,
+      "windows": 161
+    },
+    "CSO": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 54,
+      "windows": 160
+    },
+    "FKL": {
+      "class": "fall",
+      "subjects": 24,
+      "trials": 72,
+      "windows": 112
+    },
+    "FOL": {
+      "class": "fall",
+      "subjects": 24,
+      "trials": 72,
+      "windows": 113
+    },
+    "JOG": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 27,
+      "windows": 162
+    },
+    "JUM": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 27,
+      "windows": 162
+    },
+    "SCH": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 54,
+      "windows": 162
+    },
+    "SDL": {
+      "class": "fall",
+      "subjects": 24,
+      "trials": 72,
+      "windows": 124
+    },
+    "STD": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 9,
+      "windows": 54
+    },
+    "STN": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 54,
+      "windows": 324
+    },
+    "STU": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 54,
+      "windows": 322
+    },
+    "WAL": {
+      "class": "non_fall",
+      "subjects": 9,
+      "trials": 9,
+      "windows": 54
+    }
+  },
+  "cohort_relationship": {
+    "shared_subjects": [
+      "MOB_02",
+      "MOB_03",
+      "MOB_04",
+      "MOB_05",
+      "MOB_07",
+      "MOB_08",
+      "MOB_09",
+      "MOB_10",
+      "MOB_11"
+    ],
+    "fall_only_subjects": [
+      "MOB_01",
+      "MOB_06",
+      "MOB_12",
+      "MOB_13",
+      "MOB_14",
+      "MOB_15",
+      "MOB_16",
+      "MOB_17",
+      "MOB_18",
+      "MOB_19",
+      "MOB_20",
+      "MOB_21",
+      "MOB_29",
+      "MOB_30",
+      "MOB_31"
+    ],
+    "adl_only_subjects": [],
+    "shared_subject_count": 9,
+    "fall_only_subject_count": 15,
+    "fall_trials_by_cohort": {
+      "subjects_also_with_adls": 108,
+      "fall_only_subjects": 180
+    },
+    "interpretation": "ADL trials are all from subjects that also have fall trials. Most fall trials are from the fall-only subject cohort; report this cohort composition because it affects cross-subject generalization."
+  }
+}

@@ -107,10 +107,9 @@
           </div>
           <!-- Simulation Quick Controller -->
           <div class="quick-sim-card">
-            <span class="sim-label">Simulator:</span>
+            <span class="sim-label">MobiFall replay:</span>
             <button class="btn btn-sm btn-primary" id="btn-quick-sim-start">▶ Start</button>
             <button class="btn btn-sm btn-outline" id="btn-quick-sim-pause">⏸ Pause</button>
-            <button class="btn btn-sm btn-danger" id="btn-quick-sim-fall">⚡ Inject Fall</button>
           </div>
           <button class="theme-toggle" id="theme-toggle" title="Toggle Dark/Light Mode">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sun-icon"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -262,15 +261,14 @@
         <!-- Simulation Controller Card -->
         <div class="card sim-panel-card">
           <div class="card-header">
-            <h3 class="card-title">IoT Wearable Simulator Controls</h3>
-            <span class="badge-status-running" id="sim-badge-status">Simulator Idle</span>
+            <h3 class="card-title">MobiFall Trial Replay</h3>
+            <span class="badge-status-running" id="sim-badge-status">Replay Idle</span>
           </div>
           <div class="sim-controls-grid">
             <div class="sim-control-group">
               <label>Kinematic Scenario:</label>
               <select id="sim-scenario-select" class="form-control">
-                <option value="mixed_activities_with_fall">Mixed Activities + Slip Fall Incident</option>
-                <option value="dataset_replay">Replay Real Test Subject Data (UCI HAR / SisFall)</option>
+                <option value="dataset_replay">Replay real MobiFall v2.0 trial</option>
               </select>
             </div>
             <div class="sim-control-group">
@@ -285,7 +283,6 @@
               <button class="btn btn-primary" id="btn-sim-start">▶ Start Stream</button>
               <button class="btn btn-outline" id="btn-sim-pause">⏸ Pause</button>
               <button class="btn btn-danger" id="btn-sim-stop">⏹ Stop</button>
-              <button class="btn btn-warning" id="btn-sim-manual-fall">🚨 Trigger Emergency Fall</button>
             </div>
           </div>
         </div>

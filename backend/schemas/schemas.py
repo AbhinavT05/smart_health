@@ -373,9 +373,12 @@ class DashboardSummary(BaseModel):
 
 
 class SimulationControlRequest(BaseModel):
-    action: str = Field(..., description="'start', 'stop', 'pause', 'resume', 'trigger_fall'")
+    action: str = Field(..., description="'start', 'stop', 'pause', or 'resume'")
     playback_speed: Optional[float] = 1.0
-    scenario: Optional[str] = "mixed_activities_with_fall"
+    scenario: Optional[str] = "dataset_replay"
+    subject: Optional[str] = None
+    activity_code: Optional[str] = None
+    trial: Optional[str] = None
 
 
 class SimulationStatusResponse(BaseModel):

@@ -1,0 +1,134 @@
+{
+  "label_shuffle": {
+    "method": "Five repeated GroupKFold runs; each RF is trained on randomly permuted training-fold labels and evaluated against untouched held-out labels. Primary scores average fold metrics to avoid pooled-fold calibration shifts.",
+    "pooled_oof_first_repeat": {
+      "accuracy": 0.7019704433497537,
+      "balanced_accuracy": 0.4788118982282693,
+      "precision": 0.15306122448979592,
+      "recall": 0.06396588486140725,
+      "specificity": 0.8936579115951313,
+      "f1": 0.09022556390977443,
+      "fpr": 0.10634208840486867,
+      "fnr": 0.9360341151385928,
+      "roc_auc": 0.3426798468534057,
+      "pr_auc": 0.17714974136433714,
+      "confusion_matrix": {
+        "tn": 1395,
+        "fp": 166,
+        "fn": 439,
+        "tp": 30
+      },
+      "class_counts": {
+        "non_fall": 1561,
+        "fall": 469
+      }
+    },
+    "mean_std_across_folds_and_repeats": {
+      "accuracy": {
+        "mean": 0.7235299844467926,
+        "std": 0.15982104069840725
+      },
+      "balanced_accuracy": {
+        "mean": 0.507541743634039,
+        "std": 0.03800428409173303
+      },
+      "precision": {
+        "mean": 0.26218207554856204,
+        "std": 0.28061156883401506
+      },
+      "recall": {
+        "mean": 0.08622241636260856,
+        "std": 0.07177166572571837
+      },
+      "specificity": {
+        "mean": 0.9288610709054694,
+        "std": 0.054423556881091316
+      },
+      "f1": {
+        "mean": 0.10670488132157382,
+        "std": 0.08230891075512717
+      },
+      "roc_auc": {
+        "mean": 0.4892151008055041,
+        "std": 0.1250566435472433
+      },
+      "pr_auc": {
+        "mean": 0.24667200661076896,
+        "std": 0.1606532609766095
+      }
+    },
+    "performance_near_chance": true,
+    "chance_reference": 0.5
+  },
+  "dataset_identity": {
+    "status": "not_applicable",
+    "reason": "Only MobiFall is present in this experiment; SisFall-vs-MobiFall identity classification requires both datasets."
+  },
+  "majority_class_baseline": {
+    "predicted_class": "non_fall",
+    "metrics": {
+      "accuracy": 0.7689655172413793,
+      "balanced_accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "specificity": 1.0,
+      "f1": 0.0,
+      "fpr": 0.0,
+      "fnr": 1.0,
+      "roc_auc": 0.5,
+      "pr_auc": 0.23103448275862068,
+      "confusion_matrix": {
+        "tn": 1561,
+        "fp": 0,
+        "fn": 469,
+        "tp": 0
+      },
+      "class_counts": {
+        "non_fall": 1561,
+        "fall": 469
+      }
+    }
+  },
+  "subject_trial_leakage": {
+    "status": "asserted absent for every outer fold",
+    "folds": 5
+  },
+  "cohort_composition": {
+    "shared_subjects": [
+      "MOB_02",
+      "MOB_03",
+      "MOB_04",
+      "MOB_05",
+      "MOB_07",
+      "MOB_08",
+      "MOB_09",
+      "MOB_10",
+      "MOB_11"
+    ],
+    "fall_only_subjects": [
+      "MOB_01",
+      "MOB_06",
+      "MOB_12",
+      "MOB_13",
+      "MOB_14",
+      "MOB_15",
+      "MOB_16",
+      "MOB_17",
+      "MOB_18",
+      "MOB_19",
+      "MOB_20",
+      "MOB_21",
+      "MOB_29",
+      "MOB_30",
+      "MOB_31"
+    ],
+    "adl_only_subjects": [],
+    "shared_subject_count": 9,
+    "fall_only_subject_count": 15,
+    "fall_trials_by_cohort": {
+      "subjects_also_with_adls": 108,
+      "fall_only_subjects": 180
+    },
+    "interpretation": "ADL trials are all from subjects that also have fall trials. Most fall trials are from the fall-only subject cohort; report this cohort composition because it affects cross-subject generalization."
+  }
+}

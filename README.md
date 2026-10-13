@@ -1,5 +1,5 @@
 # FallGuard AI
-### Smartphone-Based Real-Time AI Fall Detection and Human Activity Monitoring System
+### MobiFall v2.0 Research Prototype for Smartphone-Based Fall Detection
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
 [![Scikit-Learn](https://img.shields.io/badge/scikit--learn-1.4.0-F7931E.svg?logo=scikit-learn)](https://scikit-learn.org)
@@ -8,8 +8,7 @@
 [![WebSocket](https://img.shields.io/badge/WebSocket-50Hz%20Realtime-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)]()
 
-> **The smartphone acts as the physical sensing device.**  
-> FallGuard AI transforms standard off-the-shelf user smartphones into clinical-grade continuous fall detection and activity recognition monitors. The smartphone streams live 6-axis kinematics over an authenticated, persistent WebSocket connection into FastAPI, maintaining a strict 5-second transient rolling buffer in memory, executing 128-sample sliding window ML inference, providing two-tier user confirmation ("I'm OK" false-alarm mitigation), and escalating confirmed emergencies to designated contacts.
+> **Research prototype, not a medical device.** The project explores 6-axis smartphone IMU fall detection using the MobiFall v2.0 dataset. It is not validated for clinical or emergency use.
 
 ---
 
@@ -51,7 +50,7 @@ flowchart TD
 
     subgraph ML_PIPELINE["4. Feature Engineering & Trained ML Model"]
         FEAT["60+ Multi-Domain Features\n(RMS, FFT Energy/Entropy, Jerk, Angular Acc, Tilt)"]
-        MODEL["Trained Classifier (Logistic Regression / Ensemble)\nFall Recall: 100%, Accuracy: 92.1%"]
+        MODEL["MobiFall v2.0 RF + SVM research models"]
         SCREENING["Two-Stage Decision Engine\n(Transparent ML Probability vs. Safety Override)"]
 
         STRIDE --> FEAT
@@ -100,13 +99,31 @@ In strict compliance with user privacy and high-performance constraints:
 - Only aggregated **FallEvents** (incidents, triage decisions, and confirmation status) are persisted.
 
 ### Unit Normalization Layer
-The trained ML pipeline (trained on UCI HAR and SisFall kinematics) expects:
+The inference pipeline expects:
 - Acceleration in **`g`** ($1g \approx 9.80665\text{ m/s}^2$)
 - Gyroscope in **`rad/s`**
 
 Android devices output accelerometer readings natively in $\text{m/s}^2$ and gyroscope in $\text{rad/s}$. The backend implements an explicit unit normalization layer on ingest:
 $$a_g = \frac{a_{\text{m/s}^2}}{9.80665}$$
 This prevents stationary gravity ($9.81\text{ m/s}^2$) from falsely triggering the $2.8g$ impact threshold.
+
+### Fall model training data
+Training uses MobiFall v2.0 only, with 24 subjects containing falls and 9 subjects containing ADLs. No SisFall or UCI HAR data is used for training. Synthetic arrays appear only in explicitly named unit-test fixtures. The real mirror is under
+`data/raw/MobiFall/sub<N>/(ADL|FALLS)/<CODE>/`, with separate `*_acc_*_*.txt`
+and `*_gyro_*_*.txt` files. Acceleration is converted from m/s^2 to g; gyro is
+already in rad/s. Files are aligned onto 50 Hz before 128-sample windows are
+created. Fall windows are retained only around each trial's maximum acceleration
+magnitude.
+
+### Reproducible MobiFall commands
+Run these from the repository root (fixed seed 42; run configuration is written under `reports/pipeline_configs/`):
+
+```bash
+python scripts/run_mobifall_pipeline.py inspect
+python scripts/run_mobifall_pipeline.py experiment
+python scripts/run_mobifall_pipeline.py train
+python scripts/run_mobifall_pipeline.py all
+```
 
 ### Transparent Fall Decision Logic
 The ML inference engine explicitly disambiguates pure model probability from safety heuristics:
@@ -213,7 +230,7 @@ A high-impact spike does not immediately contact emergency services:
 
 ## 4. Android Client Application
 
-The native Android app resides under [`mobile/android`](file:///c:/Users/kpran/OneDrive/Desktop/sfd/mobile/android):
+The native Android app resides under `mobile/android`:
 
 ```
 mobile/android/
@@ -246,9 +263,9 @@ mobile/android/
 ```
 
 ### Android Features:
-- **Foreground Service**: Uses `SensorForegroundService` with ongoing notification so sensor collection is never killed by Android background execution limits.
-- **50Hz Hardware Collector**: Uses `SensorManager.SENSOR_DELAY_GAME` for precise 20ms intervals.
-- **Local Bounded Buffering**: In the event of temporary network loss, retains at most 5 seconds of sensor data. Never writes sensor data to SQLite.
+- **Foreground Service**: Uses `SensorForegroundService`, an ongoing notification, and a partial wake lock. Android and phone vendors may still restrict background work.
+- **50Hz Resampling**: Collects independent accelerometer and gyroscope events, measures their rates, and interpolates onto a 50 Hz grid. The achieved source rates vary by phone.
+- **Local Rolling Buffer**: Retains the latest 5 seconds for inference; readings missed during network loss are not queued for later transmission. Sensor data is not written to SQLite.
 - **Emergency Lock Screen Override**: `FallConfirmationActivity` specifies `showWhenLocked="true"` and `turnScreenOn="true"` to ensure instant user accessibility during an incident.
 
 ---
@@ -300,13 +317,30 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 1. Build from the Android project directory:
    ```powershell
    cd mobile/android
-   .\gradlew.bat :app:assembleDebug
+   .\gradlew.bat assembleDebug
    ```
-2. Install `app/build/outputs/apk/debug/app-debug.apk`, or open `mobile/android` in Android Studio.
-3. On an Android Emulator, the app defaults to `http://10.0.2.2:8000`.
-4. On a physical phone, connect both devices to the same network, start FastAPI on `0.0.0.0`, allow port 8000 through Windows Firewall, and enter `http://<COMPUTER_LAN_IP>:8000` in the app. Never use `localhost`/`127.0.0.1` from the phone.
-5. Sign in or create an account in the native app. The token is encrypted with Android Keystore and the app registers its device before connecting to `/ws/sensor`.
-6. Release builds require an HTTPS backend URL, for example `-PbackendBaseUrl=https://<deployed-host>`; cleartext HTTP is enabled only in the Android debug manifest.
+2. Install with Android Platform Tools: `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+3. The emulator default is `http://10.0.2.2:8000`. A debug physical-phone build defaults to the current developer PC address `http://10.18.111.30:8000`; edit **Backend base URL** on the login or dashboard screen if the PC's LAN address changes. Do not use `localhost` or `127.0.0.1` from a phone.
+4. Start FastAPI on all interfaces with the mock alert provider:
+   ```powershell
+   $env:EMERGENCY_PROVIDER = "mock"
+   python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+5. Permit port 8000 through Windows Firewall only on a trusted private network. The command to run in an elevated PowerShell is:
+   ```powershell
+   New-NetFirewallRule -DisplayName "FallGuard API 8000" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private
+   ```
+   Review the rule and your network trust before running it.
+6. Keep the phone and PC on the same Wi-Fi. Sign in or create an account; the bearer token is encrypted using Android Keystore. Device registration precedes the authenticated `/ws/sensor` connection. The app authenticates with an initial WebSocket auth frame, which the backend accepts on the same `/ws/sensor` route as its `?token=` form.
+7. Grant notification and optional location permissions. The motion-sensor foreground service declares `HIGH_SAMPLING_RATE_SENSORS`; accelerometer and gyroscope do not require the BODY_SENSORS runtime permission. On Android 14 and newer, enable full-screen notification access for lock-screen fall prompts. If Android's battery manager restricts the app, use the prompt to allow unrestricted background use; this consumes more battery. The app shows first-run instructions to keep the phone in a trouser pocket and the screen off.
+8. Cleartext HTTP and `ws://` are enabled only for the debug build. Release builds require HTTPS/WSS, for example `-PbackendBaseUrl=https://<deployed-host>`.
+
+### Android client scope and limits
+- The model and preprocessing were developed with one dataset, MobiFall v2.0, and trouser-pocket phone placement. Keep the phone axes/orientation consistent with that placement; no rotation-invariant phone-frame conversion is performed.
+- The live client requests the fastest sensor events, low-pass filters accel and gyro, pairs their independent clocks, then linearly resamples to 50 Hz. Android provides acceleration in m/s² and angular velocity in rad/s; the backend converts acceleration to g. The training loader uses a zero-phase Butterworth filter over complete recordings, while a live phone must use a causal filter; the order and cutoff rule match, but phase and boundary behavior differ. Live-phone accuracy has not been established.
+- Monitoring uses an ongoing foreground-service notification and a partial wake lock while active. Reconnection uses exponential backoff; readings missed while disconnected are not persisted or replayed. Battery use and vendor-specific background restrictions vary by phone.
+- Fall confirmation uses a high-importance notification/full-screen intent, vibration and a 15-second countdown. “I'm OK” cancels; “Need help” or backend timeout confirms. Backend alert delivery must remain in mock mode during development.
+- This is a research prototype, not a medical device or emergency service.
 
 ---
 
@@ -328,7 +362,7 @@ pytest -v
 | `test_fall_confirmation.py` | **Timeout Escalation**: Automatic confirmation when user does not respond |
 | `test_phone_websocket.py` | **Security & Streaming**: Authenticated `/ws/sensor` telemetry streaming |
 
-### End-to-End Simulation Test:
+### End-to-End Backend Test:
 Run the end-to-end integration scenario:
 ```bash
 python scripts/e2e_phone_fallguard_test.py
@@ -337,11 +371,8 @@ This script exercises user registration, emergency contact setup, 50Hz sensor st
 
 ---
 
-## 7. Backwards Compatibility with Simulator
-The legacy ESP32 / synthetic kinematic simulator remains fully operational for development and testing:
-- **REST Controller**: `/api/simulation/control` (`start`, `stop`, `pause`, `resume`, `trigger_fall`)
-- **Dashboard UI**: Quick Simulator controls in the header and full Simulation panel remain active.
-- Both `REAL_PHONE` and `SIMULATOR` share the unified feature extraction and ML inference pipeline.
+## 7. Real MobiFall Replay
+The authenticated replay endpoint reads selected real MobiFall v2.0 trials, already aligned to 50 Hz by the loader. Replay telemetry is marked `simulated: true` to distinguish dataset playback from live phone measurements. No generated sensor waveforms are available.
 
 ---
 

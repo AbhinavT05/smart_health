@@ -25,7 +25,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Smartphone Physical Sensing Client (50Hz)"
+            android:text="Phone IMU • 50 Hz resampled stream"
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
 
@@ -179,18 +179,6 @@
             android:textSize="16sp"
             android:textStyle="bold"
             app:cornerRadius="8dp" />
-
-        <!-- Test Fall Simulation Trigger on Phone -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_simulate_fall"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="12dp"
-            android:text="Test Fall Confirmation Dialog"
-            android:textColor="@color/warning"
-            app:cornerRadius="8dp"
-            app:strokeColor="@color/warning" />
 
     </LinearLayout>
 </ScrollView>

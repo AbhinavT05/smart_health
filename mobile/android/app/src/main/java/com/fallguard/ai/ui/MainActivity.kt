@@ -1,6 +1,8 @@
 package com.fallguard.ai.ui
 
 import android.Manifest
+import android.app.AlertDialog
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -11,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.widget.TextView
@@ -40,7 +43,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etBackendUrl: TextInputEditText
     private lateinit var etDeviceId: TextInputEditText
     private lateinit var btnToggleMonitoring: MaterialButton
-    private lateinit var btnSimulateFall: MaterialButton
     private lateinit var btnLogout: MaterialButton
     private lateinit var session: AuthSession
     private val authApi by lazy { AuthApi(this) }
@@ -57,7 +59,11 @@ class MainActivity : AppCompatActivity() {
                     "Acc:  (%.2f, %.2f, %.2f) m/s²\nGyro: (%.2f, %.2f, %.2f) rad/s",
                     sc.latestAx, sc.latestAy, sc.latestAz, sc.latestGx, sc.latestGy, sc.latestGz
                 )
-                tvBufferInfo.text = String.format("Rolling Buffer: %d / 250 samples (~%.1fs)", sc.rollingBuffer.size, sc.rollingBuffer.size / 50.0)
+                tvBufferInfo.text = String.format(
+                    "Rolling Buffer: %d / 250 (~%.1fs)\nRate: acc %.1f Hz, gyro %.1f Hz, output %.1f Hz | skipped grid points: %d",
+                    sc.rollingBuffer.size, sc.rollingBuffer.size / 50.0,
+                    sc.measuredAccelHz, sc.measuredGyroHz, sc.emittedHz, sc.droppedGridSamples,
+                )
             }
             mainHandler.postDelayed(this, 200)
         }
@@ -96,6 +102,7 @@ class MainActivity : AppCompatActivity() {
         requestAppPermissions()
         loadDashboardOnce()
         mainHandler.post(statsRunnable)
+        showFirstRunPlacementInstructions()
     }
 
     private fun initViews() {
@@ -107,7 +114,6 @@ class MainActivity : AppCompatActivity() {
         etBackendUrl = findViewById(R.id.et_server_url)
         etDeviceId = findViewById(R.id.et_device_id)
         btnToggleMonitoring = findViewById(R.id.btn_toggle_monitoring)
-        btnSimulateFall = findViewById(R.id.btn_simulate_fall)
         btnLogout = findViewById(R.id.btn_logout)
 
         etBackendUrl.setText(BackendConfig.getBaseUrl(this))
@@ -117,13 +123,6 @@ class MainActivity : AppCompatActivity() {
 
         btnToggleMonitoring.setOnClickListener { if (isMonitoringActive) stopMonitoring() else startMonitoring() }
         btnLogout.setOnClickListener { logout() }
-        btnSimulateFall.setOnClickListener {
-            startActivity(Intent(this, FallConfirmationActivity::class.java).apply {
-                putExtra("EVENT_ID", 9999)
-                putExtra("TIMEOUT_SECONDS", 15f)
-                putExtra("CONFIDENCE", 0.95f)
-            })
-        }
     }
 
     private fun loadDashboardOnce() {
@@ -149,6 +148,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMonitoring() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), permissionsRequestCode)
+            tvDashboardSummary.text = "Allow notifications, then tap Start Monitoring again."
+            return
+        }
         val baseUrl = BackendConfig.saveBaseUrl(this, etBackendUrl.text?.toString().orEmpty())
         if (baseUrl == null) {
             tvDashboardSummary.text = "Enter a valid backend URL (for example http://10.0.2.2:8000)."
@@ -183,6 +188,7 @@ class MainActivity : AppCompatActivity() {
                 btnToggleMonitoring.text = getString(R.string.btn_stop)
                 btnToggleMonitoring.setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.danger))
                 tvDashboardSummary.text = "Device registered. Connecting securely to sensor monitoring…"
+                promptBackgroundOperationSettings()
             } catch (e: ApiException) {
                 if (e.statusCode == 401) expireSession("Your session expired. Please sign in again.")
                 else tvDashboardSummary.text = "Could not register this device (HTTP ${e.statusCode}): ${e.message}"
@@ -235,9 +241,50 @@ class MainActivity : AppCompatActivity() {
     private fun requestAppPermissions() {
         val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.POST_NOTIFICATIONS)
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.BODY_SENSORS)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
         if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionsRequestCode)
+    }
+
+    private fun showFirstRunPlacementInstructions() {
+        val prefs = getSharedPreferences("fallguard_settings", MODE_PRIVATE)
+        if (prefs.getBoolean("pocket_placement_acknowledged", false)) return
+        AlertDialog.Builder(this)
+            .setTitle("Before monitoring")
+            .setMessage("Carry the phone securely in a trouser pocket, in the same orientation used during the MobiFall study. Keep the screen off during monitoring. This is a research prototype, not a medical device.")
+            .setPositiveButton("Understood") { _, _ -> prefs.edit().putBoolean("pocket_placement_acknowledged", true).apply() }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun promptBackgroundOperationSettings() {
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !power.isIgnoringBatteryOptimizations(packageName)) {
+            val prefs = getSharedPreferences("fallguard_settings", MODE_PRIVATE)
+            if (!prefs.getBoolean("battery_prompt_shown", false)) {
+                prefs.edit().putBoolean("battery_prompt_shown", true).apply()
+                AlertDialog.Builder(this)
+                    .setTitle("Allow background monitoring")
+                    .setMessage("Android may pause sensor streaming when the screen is off. For a research session, open Battery Optimization settings and allow FallGuard to run unrestricted. This increases battery use.")
+                    .setNegativeButton("Later", null)
+                    .setPositiveButton("Open settings") { _, _ ->
+                        runCatching { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                    }
+                    .show()
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            val manager = getSystemService(NotificationManager::class.java)
+            if (!manager.canUseFullScreenIntent()) {
+                AlertDialog.Builder(this)
+                    .setTitle("Enable fall alert display")
+                    .setMessage("Android needs full-screen notification access to show a fall confirmation over the lock screen. You can enable FallGuard in the next screen.")
+                    .setNegativeButton("Later", null)
+                    .setPositiveButton("Open settings") { _, _ ->
+                        runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).setData(android.net.Uri.parse("package:$packageName"))) }
+                    }
+                    .show()
+            }
+        }
     }
 
     override fun onDestroy() {

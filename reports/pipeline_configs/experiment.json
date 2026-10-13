@@ -1,0 +1,7 @@
+{
+  "dataset": "MobiFall v2.0",
+  "command": "experiment",
+  "seed": 42,
+  "outer_folds": 5,
+  "generated_utc": "2026-10-13T07:17:44.092523+00:00"
+}
